@@ -1,0 +1,152 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/domain/entities/book.dart';
+import 'package:myreader/core/providers/usecase_providers.dart';
+
+class BooksState {
+  final List<Book> books;
+  final bool isLoading;
+  final String? error;
+  final BookSortMode sortMode;
+
+  const BooksState({
+    this.books = const [],
+    this.isLoading = false,
+    this.error,
+    this.sortMode = BookSortMode.latestAdded,
+  });
+
+  BooksState copyWith({
+    List<Book>? books,
+    bool? isLoading,
+    String? error,
+    BookSortMode? sortMode,
+  }) {
+    return BooksState(
+      books: books ?? this.books,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+      sortMode: sortMode ?? this.sortMode,
+    );
+  }
+}
+
+enum BookSortMode { latestAdded, recentRead, title, author }
+
+class BooksNotifier extends StateNotifier<BooksState> {
+  final Ref _ref;
+
+  BooksNotifier(this._ref) : super(const BooksState());
+
+  Future<void> loadBooks() async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final getBooks = _ref.read(getBooksUseCaseProvider);
+      final books = await getBooks();
+      state = state.copyWith(
+        books: _applySort(books, state.sortMode),
+        isLoading: false,
+      );
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), isLoading: false);
+    }
+  }
+
+  Future<void> searchBooks(String query) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final searchBooks = _ref.read(searchBooksUseCaseProvider);
+      final books = await searchBooks(query);
+      state = state.copyWith(
+        books: _applySort(books, state.sortMode),
+        isLoading: false,
+      );
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), isLoading: false);
+    }
+  }
+
+  void setSortMode(BookSortMode mode) {
+    if (mode == state.sortMode) {
+      return;
+    }
+    state = state.copyWith(
+      sortMode: mode,
+      books: _applySort(state.books, mode),
+    );
+  }
+
+  Future<void> deleteBook(String id) async {
+    try {
+      final deleteBook = _ref.read(deleteBookUseCaseProvider);
+      await deleteBook(id);
+      await loadBooks();
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+    }
+  }
+
+  Future<void> addBook(Book book) async {
+    try {
+      final addBook = _ref.read(addBookUseCaseProvider);
+      await addBook(book);
+      await loadBooks();
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+    }
+  }
+
+  List<Book> _applySort(List<Book> books, BookSortMode mode) {
+    final sorted = List<Book>.from(books);
+    switch (mode) {
+      case BookSortMode.latestAdded:
+        sorted.sort((a, b) {
+          final aPrimary = a.lastReadAt ?? a.importedAt;
+          final bPrimary = b.lastReadAt ?? b.importedAt;
+          final cmp = bPrimary.compareTo(aPrimary);
+          if (cmp != 0) {
+            return cmp;
+          }
+          return b.importedAt.compareTo(a.importedAt);
+        });
+        break;
+      case BookSortMode.recentRead:
+        sorted.sort((a, b) {
+          final aRead = a.lastReadAt;
+          final bRead = b.lastReadAt;
+          if (aRead == null && bRead == null) {
+            return b.importedAt.compareTo(a.importedAt);
+          }
+          if (aRead == null) return 1;
+          if (bRead == null) return -1;
+          final cmp = bRead.compareTo(aRead);
+          if (cmp != 0) return cmp;
+          return b.importedAt.compareTo(a.importedAt);
+        });
+        break;
+      case BookSortMode.title:
+        sorted.sort((a, b) => a.title.compareTo(b.title));
+        break;
+      case BookSortMode.author:
+        sorted.sort((a, b) => (a.author ?? '').compareTo(b.author ?? ''));
+        break;
+    }
+    return sorted;
+  }
+}
+
+final booksProvider = StateNotifierProvider<BooksNotifier, BooksState>((ref) {
+  return BooksNotifier(ref);
+});
+
+final bookByIdProvider = FutureProvider.family<Book?, String>((ref, id) async {
+  final getBookById = ref.watch(getBookByIdUseCaseProvider);
+  return await getBookById(id);
+});
+
+final booksByCategoryProvider = FutureProvider.family<List<Book>, String>((
+  ref,
+  categoryId,
+) async {
+  final getBooksByCategory = ref.watch(getBooksByCategoryUseCaseProvider);
+  return await getBooksByCategory(categoryId);
+});
