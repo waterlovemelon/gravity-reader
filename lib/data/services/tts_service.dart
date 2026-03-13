@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:myreader/core/constants/app_constants.dart';
 
@@ -124,6 +125,7 @@ class TtsService {
       'voice="${AppConstants.ttsVoice}", '
       'tokenConfigured=${AppConstants.ttsToken.trim().isNotEmpty}',
     );
+    unawaited(_configureAudioSession());
     _playerStateSubscription = _player.playerStateStream.listen(
       _handlePlayerState,
     );
@@ -140,6 +142,23 @@ class TtsService {
       },
     );
     _channel.setMethodCallHandler(_handleNativeCallback);
+  }
+
+  Future<void> _configureAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.speech());
+      await session.setActive(true);
+      _log('audio session configured for speech playback.');
+    } catch (e, st) {
+      _log('audio session configure failed: $e');
+      developer.log(
+        'TtsService audio session configure error',
+        name: 'TtsService',
+        error: e,
+        stackTrace: st,
+      );
+    }
   }
 
   TtsState get state => _state;

@@ -119,7 +119,7 @@ Map<String, dynamic> _prepareTxtChapterData(String text) {
 }
 
 String _normalizeParagraphSpacing(String text) {
-  return text.replaceAll(RegExp(r'\n{2,}'), '\n\n\n');
+  return text.replaceAll(RegExp(r'\n{2,}'), '\n\n\n\n');
 }
 
 class _TableOfContentsSheet extends StatefulWidget {
@@ -353,27 +353,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   static const String _prefFontSizePreset = 'reader_font_size_preset_v1';
   static const String _prefPaddingPreset = 'reader_padding_preset_v1';
   static const String _prefLineHeightPreset = 'reader_line_height_preset_v1';
+  static const String _prefTextAlignPreset = 'reader_text_align_preset_v1';
+  static const String _prefParagraphIndent = 'reader_paragraph_indent_v1';
+  static const String _prefFontStylePreset = 'reader_font_style_preset_v1';
   static const bool _enablePageCountMode = false;
-  static const Set<String> _breakChars = {
-    '\n',
-    ' ',
-    '。',
-    '！',
-    '？',
-    '；',
-    '，',
-    '、',
-    '.',
-    '!',
-    '?',
-    ';',
-    ',',
-    ':',
-    '：',
-    '）',
-    ')',
-  };
-
   final PageController _pageController = PageController();
   final int _fallbackPages = 100;
 
@@ -395,8 +378,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _repaginateScheduled = false;
   int _paginationJobId = 0;
   final Map<String, List<_TxtPage>> _txtPageCache = {};
-  bool _usingQuickPages = false;
-  bool _didUserTurnPageSinceOpen = false;
   bool _isUserPaging = false;
   Completer<void>? _pagingIdleCompleter;
 
@@ -413,6 +394,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _autoPageEnabled = false;
   Timer? _autoPageTimer;
   bool _canStartTxtLoad = true;
+  int _textAlignPreset = 0;
+  bool _paragraphIndentEnabled = true;
+  int _fontStylePreset = 0;
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   @override
@@ -474,6 +458,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final font = prefs.getInt(_prefFontSizePreset);
     final padding = prefs.getInt(_prefPaddingPreset);
     final lineHeight = prefs.getInt(_prefLineHeightPreset);
+    final textAlignPreset = prefs.getInt(_prefTextAlignPreset);
+    final paragraphIndent = prefs.getBool(_prefParagraphIndent);
+    final fontStylePreset = prefs.getInt(_prefFontStylePreset);
     if (!mounted) {
       return;
     }
@@ -486,6 +473,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       }
       if (lineHeight != null) {
         _lineHeightPreset = lineHeight.clamp(0, 3);
+      }
+      if (textAlignPreset != null) {
+        _textAlignPreset = textAlignPreset.clamp(0, 3);
+      }
+      if (paragraphIndent != null) {
+        _paragraphIndentEnabled = paragraphIndent;
+      }
+      if (fontStylePreset != null) {
+        _fontStylePreset = fontStylePreset.clamp(0, 2);
       }
     });
     if (_txtChapters.isNotEmpty) {
@@ -502,6 +498,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         await prefs.setInt(_prefFontSizePreset, _fontSizePreset);
         await prefs.setInt(_prefPaddingPreset, _paddingPreset);
         await prefs.setInt(_prefLineHeightPreset, _lineHeightPreset);
+        await prefs.setInt(_prefTextAlignPreset, _textAlignPreset);
+        await prefs.setBool(_prefParagraphIndent, _paragraphIndentEnabled);
+        await prefs.setInt(_prefFontStylePreset, _fontStylePreset);
       },
     );
   }
@@ -574,7 +573,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 setState(() {
                   _currentPage = page;
                 });
-                _didUserTurnPageSinceOpen = true;
                 if (_isTxtBook(book)) {
                   _scheduleSaveTxtProgress(book);
                 }
@@ -634,9 +632,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       final chapterText = chapter?.content ?? '';
       final safeStart = page.startOffset.clamp(0, chapterText.length);
       final safeEnd = page.endOffset.clamp(safeStart, chapterText.length);
-      final visibleText = safeEnd > safeStart
-          ? chapterText.substring(safeStart, safeEnd)
-          : '';
+      final showChapterHeader =
+          page.startOffset == 0 ||
+          (index > 0 && _txtPages[index - 1].chapterIndex != page.chapterIndex);
+      final visibleText = _visiblePageBodyText(
+        chapterText: chapterText,
+        start: safeStart,
+        end: safeEnd,
+        showChapterHeader: showChapterHeader,
+        chapterTitle: page.title,
+      );
+      final pageTextAlign = _resolveTextAlign(visibleText);
+      final bodyStyle = TextStyle(
+        fontSize: _contentFontSize,
+        height: _contentLineHeight,
+        color: _textColor,
+        fontFamily: _contentFontFamily,
+      );
       return SafeArea(
         child: Padding(
           padding: _contentPadding,
@@ -646,16 +658,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               Expanded(
                 child: SizedBox(
                   width: double.infinity,
-                  child: Text(
-                    visibleText,
+                  child: RichText(
                     textScaler: TextScaler.noScaling,
-                    strutStyle: _contentStrutStyle,
-                    textAlign: TextAlign.justify,
+                    textAlign: pageTextAlign,
                     textWidthBasis: TextWidthBasis.parent,
-                    style: TextStyle(
-                      fontSize: _contentFontSize,
-                      height: _contentLineHeight,
-                      color: _textColor,
+                    strutStyle: _contentStrutStyle,
+                    text: TextSpan(
+                      style: bodyStyle,
+                      children: _buildPageTextSpans(
+                        text: visibleText,
+                        bodyStyle: bodyStyle,
+                        chapterTitle: showChapterHeader ? page.title : null,
+                        startsAtParagraphBoundary: _startsAtParagraphBoundary(
+                          chapterText: chapterText,
+                          startOffset: safeStart,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1106,14 +1124,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Future<void> _showTypographyPanel() async {
-    const paddingLabels = ['紧凑', '标准', '宽松'];
-    const lineHeightLabels = ['紧凑', '舒适', '宽阔', '沉浸'];
+    const paddingLabels = ['小', '边距', '大'];
+    const lineHeightLabels = ['紧', '行距', '松'];
 
     await _showReaderActionPanel(
       title: '字体设置',
       child: StatefulBuilder(
         builder: (context, setModalState) {
           final fontSize = _fontSizePreset.clamp(16, 40);
+          final lineHeightDisplayIndex = _lineHeightPreset <= 1
+              ? 0
+              : _lineHeightPreset == 2
+              ? 1
+              : 2;
 
           void updateTypography({
             int? font,
@@ -1142,84 +1165,138 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                decoration: BoxDecoration(
-                  color: _textColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _textColor.withOpacity(0.18)),
-                ),
-                child: Text(
-                  '阅读让视线更轻松，好的排版能显著降低疲劳。',
-                  style: TextStyle(
-                    fontSize: fontSize.toDouble(),
-                    height: _contentLineHeight,
-                    color: _textColor,
-                  ),
-                ),
-              ),
               const SizedBox(height: 8),
-              _panelSubTitle('字体大小'),
-              const SizedBox(height: 8),
-              Row(
+              Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
                 children: [
-                  _stepButtonForTypography(
-                    icon: Icons.remove_rounded,
-                    enabled: fontSize > 16,
-                    onTap: () => updateTypography(font: fontSize - 1),
-                  ),
-                  const SizedBox(width: 8),
                   Container(
-                    height: 34,
-                    width: 60,
-                    alignment: Alignment.center,
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                     decoration: BoxDecoration(
                       color: _textColor.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'A',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: _textColor.withOpacity(0.78),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Expanded(
+                          child: _buildSteppedSlider(
+                            value: fontSize,
+                            min: 16,
+                            max: 40,
+                            showDivisions: false,
+                            onChanged: (v) => updateTypography(font: v),
+                          ),
+                        ),
+                        Text(
+                          'A',
+                          style: TextStyle(
+                            fontSize: 34,
+                            color: _textColor.withOpacity(0.78),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 64,
+                    height: 64,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _readerBgColor,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
                     child: Text(
                       '$fontSize',
                       style: TextStyle(
-                        color: _textColor,
+                        color: _textColor.withOpacity(0.95),
+                        fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _stepButtonForTypography(
-                    icon: Icons.add_rounded,
-                    enabled: fontSize < 40,
-                    onTap: () => updateTypography(font: fontSize + 1),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _segmentedChoices(
+                      labels: paddingLabels,
+                      selectedIndex: _paddingPreset,
+                      onSelect: (index) => updateTypography(padding: index),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _segmentedChoices(
+                      labels: lineHeightLabels,
+                      selectedIndex: lineHeightDisplayIndex,
+                      onSelect: (index) {
+                        final mapped = index == 0
+                            ? 1
+                            : index == 1
+                            ? 2
+                            : 3;
+                        updateTypography(lineHeight: mapped);
+                      },
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              _buildSteppedSlider(
-                value: fontSize,
-                min: 16,
-                max: 40,
-                showDivisions: false,
-                onChanged: (v) => updateTypography(font: v),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _settingEntryButton(
+                      label: '字体样式',
+                      onTap: () async {
+                        await _showFontStyleAndLayoutPanel();
+                        if (mounted) {
+                          setModalState(() {});
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _settingEntryButton(
+                      label: _paragraphIndentEnabled ? '首行缩进' : '首行顶格',
+                      onTap: () async {
+                        await _showParagraphIndentPanel();
+                        if (mounted) {
+                          setModalState(() {});
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '当前字号 $fontSize',
+                style: TextStyle(
+                  color: _textColor.withOpacity(0.72),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 8),
-              _panelSubTitle('页边距'),
-              const SizedBox(height: 8),
-              _segmentedChoices(
-                labels: paddingLabels,
-                selectedIndex: _paddingPreset,
-                onSelect: (index) => updateTypography(padding: index),
-              ),
-              const SizedBox(height: 12),
-              _panelSubTitle('行距'),
-              const SizedBox(height: 8),
-              _segmentedChoices(
-                labels: lineHeightLabels,
-                selectedIndex: _lineHeightPreset,
-                onSelect: (index) => updateTypography(lineHeight: index),
-              ),
-              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
@@ -1227,8 +1304,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                       '恢复默认',
                       textColor: _textColor,
                       bgColor: _textColor.withOpacity(0.08),
-                      onTap: () =>
-                          updateTypography(font: 20, padding: 1, lineHeight: 2),
+                      onTap: () {
+                        setState(() {
+                          _fontSizePreset = 20;
+                          _paddingPreset = 1;
+                          _lineHeightPreset = 2;
+                          _textAlignPreset = 0;
+                          _paragraphIndentEnabled = true;
+                          _fontStylePreset = 0;
+                        });
+                        setModalState(() {});
+                        _scheduleSaveReaderPreferences();
+                        _scheduleRepaginate();
+                      },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1241,6 +1329,144 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                     ),
                   ),
                 ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _settingEntryButton({
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Container(
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _textColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: _textColor.withOpacity(0.92),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 22,
+                color: _textColor.withOpacity(0.45),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFontStyleAndLayoutPanel() async {
+    const styleOptions = ['默认', '衬线', '等宽'];
+    const alignOptions = ['自动', '两端', '左对齐', '居中'];
+    var draftStyle = _fontStylePreset;
+    var draftAlign = _textAlignPreset;
+
+    await _showReaderActionPanel(
+      title: '字体样式',
+      child: StatefulBuilder(
+        builder: (context, setModalState) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              _panelSubTitle('字体'),
+              const SizedBox(height: 8),
+              _segmentedChoices(
+                labels: styleOptions,
+                selectedIndex: draftStyle,
+                onSelect: (index) {
+                  draftStyle = index.clamp(0, 2);
+                  setModalState(() {});
+                },
+              ),
+              const SizedBox(height: 12),
+              _panelSubTitle('布局方式'),
+              const SizedBox(height: 8),
+              _segmentedChoices(
+                labels: alignOptions,
+                selectedIndex: draftAlign,
+                onSelect: (index) {
+                  draftAlign = index.clamp(0, 3);
+                  setModalState(() {});
+                },
+              ),
+              const SizedBox(height: 12),
+              _actionPill(
+                '应用',
+                textColor: _textColor,
+                bgColor: _textColor.withOpacity(0.08),
+                onTap: () {
+                  setState(() {
+                    _fontStylePreset = draftStyle;
+                    _textAlignPreset = draftAlign;
+                  });
+                  _scheduleSaveReaderPreferences();
+                  _scheduleRepaginate();
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showParagraphIndentPanel() async {
+    const options = ['首行缩进', '首行顶格'];
+    var draft = _paragraphIndentEnabled ? 0 : 1;
+
+    await _showReaderActionPanel(
+      title: '首行顶格',
+      child: StatefulBuilder(
+        builder: (context, setModalState) {
+          return Column(
+            children: [
+              const SizedBox(height: 8),
+              _segmentedChoices(
+                labels: options,
+                selectedIndex: draft,
+                onSelect: (index) {
+                  draft = index.clamp(0, 1);
+                  setModalState(() {});
+                },
+              ),
+              const SizedBox(height: 12),
+              _actionPill(
+                '应用',
+                textColor: _textColor,
+                bgColor: _textColor.withOpacity(0.08),
+                onTap: () {
+                  setState(() {
+                    _paragraphIndentEnabled = draft == 0;
+                  });
+                  _scheduleSaveReaderPreferences();
+                  _scheduleRepaginate();
+                  Navigator.of(context).pop();
+                },
               ),
             ],
           );
@@ -1378,51 +1604,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
-  Widget _stepButtonForTypography({
-    required IconData icon,
-    required bool enabled,
-    required VoidCallback onTap,
-  }) {
-    if (_isIOS) {
-      return CupertinoButton(
-        padding: EdgeInsets.zero,
-        minimumSize: const Size(34, 34),
-        onPressed: enabled ? onTap : null,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: _textColor.withOpacity(enabled ? 0.1 : 0.05),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(
-            icon,
-            size: 18,
-            color: _textColor.withOpacity(enabled ? 0.9 : 0.4),
-          ),
-        ),
-      );
-    }
-
-    return SizedBox(
-      width: 34,
-      height: 34,
-      child: Material(
-        color: _textColor.withOpacity(enabled ? 0.1 : 0.05),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: enabled ? onTap : null,
-          child: Icon(
-            icon,
-            size: 18,
-            color: _textColor.withOpacity(enabled ? 0.9 : 0.4),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _segmentedChoices({
     required List<String> labels,
     required int selectedIndex,
@@ -1506,7 +1687,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       if (_txtPages.isNotEmpty && _currentPage == 0) {
         _handleTxtEdgePaging(previous: true);
       }
-      _jumpToPage(max(0, _currentPage - 1));
+      _turnPage(forward: false, totalPages: totalPages);
       return;
     }
 
@@ -1514,7 +1695,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       if (_txtPages.isNotEmpty && _currentPage >= totalPages - 1) {
         _handleTxtEdgePaging(previous: false);
       }
-      _jumpToPage(min(totalPages - 1, _currentPage + 1));
+      _turnPage(forward: true, totalPages: totalPages);
       return;
     }
 
@@ -1701,6 +1882,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
+  void _turnPage({required bool forward, required int totalPages}) {
+    final target = forward
+        ? min(totalPages - 1, _currentPage + 1)
+        : max(0, _currentPage - 1);
+    if (target == _currentPage) {
+      return;
+    }
+    _jumpToPage(target);
+  }
+
   void _setUserPaging(bool paging) {
     if (_isUserPaging == paging) {
       return;
@@ -1825,8 +2016,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             _paginationSignature = signature;
             _isLoadingTxt = false;
             _txtLoadScheduled = false;
-            _usingQuickPages = false;
-            _didUserTurnPageSinceOpen = false;
           });
           _txtPageCache.clear();
           _txtPageCache[_buildPaginationCacheKey(signature)] =
@@ -1859,8 +2048,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         _paginationSignature = -1;
         _isLoadingTxt = false;
         _txtLoadScheduled = false;
-        _usingQuickPages = true;
-        _didUserTurnPageSinceOpen = false;
       });
 
       _txtPageCache.clear();
@@ -1963,6 +2150,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _fontSizePreset,
       _paddingPreset,
       _lineHeightPreset,
+      _paragraphIndentEnabled,
+      _fontStylePreset,
     );
   }
 
@@ -2049,7 +2238,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _txtToc = toc;
       _paginationSignature = signature;
       _currentPage = restoredPage;
-      _usingQuickPages = false;
     });
     _restorePageAfterBuild(restoredPage);
   }
@@ -2227,7 +2415,156 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       fontSize: _contentFontSize,
       height: _contentLineHeight,
       color: _textColor,
+      fontFamily: _contentFontFamily,
     );
+  }
+
+  List<InlineSpan> _buildParagraphSpans(
+    String text,
+    TextStyle style, {
+    required bool startsAtParagraphBoundary,
+    bool useWidgetIndent = true,
+  }) {
+    if (text.isEmpty) {
+      return const [];
+    }
+    final lines = text.split('\n');
+    final spans = <InlineSpan>[];
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final isBlank = line.trim().isEmpty;
+      final lineStartsParagraph = i == 0 ? startsAtParagraphBoundary : true;
+      if (!isBlank && _paragraphIndentEnabled && lineStartsParagraph) {
+        if (useWidgetIndent) {
+          spans.add(
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: SizedBox(width: _paragraphIndentWidthForText(text)),
+            ),
+          );
+        } else {
+          spans.add(
+            TextSpan(text: _paragraphIndentPrefixForText(text), style: style),
+          );
+        }
+      }
+      spans.add(TextSpan(text: line, style: style));
+      if (i < lines.length - 1) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+    }
+
+    return spans;
+  }
+
+  List<InlineSpan> _buildPageTextSpans({
+    required String text,
+    required TextStyle bodyStyle,
+    String? chapterTitle,
+    required bool startsAtParagraphBoundary,
+    bool useWidgetIndent = true,
+  }) {
+    final spans = <InlineSpan>[];
+    final title = chapterTitle?.trim() ?? '';
+    if (title.isNotEmpty) {
+      spans.add(
+        TextSpan(
+          text: title,
+          style: bodyStyle.copyWith(
+            fontSize: _contentFontSize * 1.2,
+            fontWeight: FontWeight.w800,
+            height: _contentLineHeight + 0.12,
+          ),
+        ),
+      );
+      // chapter title spacing before body
+      spans.add(const TextSpan(text: '\n\n'));
+    }
+    spans.addAll(
+      _buildParagraphSpans(
+        text,
+        bodyStyle,
+        startsAtParagraphBoundary: startsAtParagraphBoundary,
+        useWidgetIndent: useWidgetIndent,
+      ),
+    );
+    return spans;
+  }
+
+  String _paragraphIndentPrefixForText(String text) {
+    if (!_paragraphIndentEnabled) {
+      return '';
+    }
+    return _isCjkDominant(text) ? '\u3000\u3000' : '\u00A0\u00A0';
+  }
+
+  String _visiblePageBodyText({
+    required String chapterText,
+    required int start,
+    required int end,
+    required bool showChapterHeader,
+    required String chapterTitle,
+  }) {
+    final safeStart = start.clamp(0, chapterText.length);
+    final safeEnd = end.clamp(safeStart, chapterText.length);
+    final raw = safeEnd > safeStart
+        ? chapterText.substring(safeStart, safeEnd)
+        : '';
+    if (!showChapterHeader) {
+      return raw;
+    }
+    return _stripDuplicatedLeadingTitle(raw, chapterTitle);
+  }
+
+  bool _startsAtParagraphBoundary({
+    required String chapterText,
+    required int startOffset,
+  }) {
+    if (startOffset <= 0) {
+      return true;
+    }
+    if (startOffset > chapterText.length) {
+      return false;
+    }
+
+    final prevLineBreak = chapterText.lastIndexOf('\n', startOffset - 1);
+    final lineStart = prevLineBreak + 1;
+    if (lineStart != startOffset) {
+      return false;
+    }
+
+    if (prevLineBreak < 0) {
+      return true;
+    }
+    final prevPrevBreak = chapterText.lastIndexOf('\n', prevLineBreak - 1);
+    final prevLineStart = prevPrevBreak + 1;
+    final prevLine = chapterText.substring(prevLineStart, prevLineBreak).trim();
+    return prevLine.isEmpty;
+  }
+
+  String _stripDuplicatedLeadingTitle(String text, String title) {
+    final trimmedTitle = title.trim();
+    if (trimmedTitle.isEmpty || text.trim().isEmpty) {
+      return text;
+    }
+    final lines = text.split('\n');
+    if (lines.isEmpty) {
+      return text;
+    }
+    final firstLine = lines.first.trim();
+    if (firstLine != trimmedTitle) {
+      return text;
+    }
+    var i = 1;
+    while (i < lines.length && lines[i].trim().isEmpty) {
+      i++;
+    }
+    if (i >= lines.length) {
+      return '';
+    }
+    return lines.sublist(i).join('\n');
   }
 
   StrutStyle get _contentStrutStyle => StrutStyle(
@@ -2263,6 +2600,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         width: width,
         height: height,
         style: style,
+        chapterTitle: chapter.title,
       );
       pages.add(
         _TxtPage(
@@ -2287,6 +2625,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     required double width,
     required double height,
     required TextStyle style,
+    required String chapterTitle,
   }) {
     final length = text.length;
     if (start >= length) {
@@ -2299,44 +2638,78 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       chunkSize = length - start;
     }
     var end = min(length, start + chunkSize);
-
-    final painter = TextPainter(
-      textDirection: TextDirection.ltr,
-      maxLines: null,
-      textScaler: TextScaler.noScaling,
-      strutStyle: _contentStrutStyle,
-    );
     final safeHeight = max(48.0, height - _paginationSafetyInset);
 
-    while (true) {
-      painter.text = TextSpan(text: text.substring(start, end), style: style);
-      painter.layout(maxWidth: width);
-
-      if (painter.height <= safeHeight) {
-        if (end >= length) {
-          return length;
-        }
-        final currentSize = end - start;
-        final nextSize = min(length - start, currentSize * 2);
-        if (nextSize <= currentSize) {
-          return end;
-        }
-        end = start + nextSize;
-        continue;
-      }
-
-      final position = painter.getPositionForOffset(
-        Offset(width, max(0, safeHeight - 1)),
+    bool fits(int candidateEnd) {
+      final showChapterHeader = start == 0;
+      final visibleText = _visiblePageBodyText(
+        chapterText: text,
+        start: start,
+        end: candidateEnd,
+        showChapterHeader: showChapterHeader,
+        chapterTitle: chapterTitle,
       );
-      var localEnd = position.offset;
-      if (localEnd <= 0) {
-        localEnd = max(1, min(end - start, 64));
-      }
-      var rawEnd = start + localEnd;
-      rawEnd = rawEnd.clamp(start + 1, end);
-      final naturalEnd = _findNaturalBreakBefore(text, start, rawEnd);
-      return naturalEnd.clamp(start + 1, length);
+      final pageTextAlign = _resolveTextAlign(visibleText);
+      final painter = TextPainter(
+        text: TextSpan(
+          style: style,
+          children: _buildPageTextSpans(
+            text: visibleText,
+            bodyStyle: style,
+            chapterTitle: showChapterHeader ? chapterTitle : null,
+            startsAtParagraphBoundary: _startsAtParagraphBoundary(
+              chapterText: text,
+              startOffset: start,
+            ),
+            useWidgetIndent: false,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        textAlign: pageTextAlign,
+        textWidthBasis: TextWidthBasis.parent,
+        maxLines: null,
+        textScaler: TextScaler.noScaling,
+        strutStyle: _contentStrutStyle,
+      );
+      painter.layout(maxWidth: width);
+      return painter.height <= safeHeight;
     }
+
+    if (!fits(start + 1)) {
+      return (start + 1).clamp(start + 1, length).toInt();
+    }
+
+    var low = start + 1;
+    if (fits(end)) {
+      low = end;
+      while (low < length) {
+        final currentSize = low - start;
+        final next = start + min(length - start, currentSize * 2).toInt();
+        if (next <= low) {
+          break;
+        }
+        if (!fits(next)) {
+          end = next;
+          break;
+        }
+        low = next;
+      }
+      if (low >= length) {
+        return length;
+      }
+    }
+
+    var high = end;
+    while (low + 1 < high) {
+      final mid = low + ((high - low) ~/ 2);
+      if (fits(mid)) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+
+    return low.clamp(start + 1, length);
   }
 
   int _estimateCharsPerPage({required double width, required double height}) {
@@ -2398,6 +2771,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           width: width,
           height: height,
           style: style,
+          chapterTitle: prev.title,
         );
         prevPages.add(
           _TxtPage(
@@ -2435,6 +2809,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           width: width,
           height: height,
           style: style,
+          chapterTitle: chapter.title,
         );
         pages.add(
           _TxtPage(
@@ -2454,20 +2829,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       ];
     }
     return pages;
-  }
-
-  int _findNaturalBreakBefore(String text, int start, int end) {
-    if (end <= start + 1) {
-      return min(text.length, start + 1);
-    }
-    final minIndex = max(start + 1, end - 72);
-    for (var i = end; i > minIndex; i--) {
-      final char = text[i - 1];
-      if (_breakChars.contains(char)) {
-        return i;
-      }
-    }
-    return end;
   }
 
   List<_TocEntry> _buildTocFromPages(List<_TxtPage> pages) {
@@ -2776,6 +3137,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return text.length < 80 && cjkCount >= 2;
   }
 
+  TextAlign _resolveTextAlign(String text) {
+    switch (_textAlignPreset) {
+      case 1:
+        return TextAlign.justify;
+      case 2:
+        return TextAlign.start;
+      case 3:
+        return TextAlign.center;
+      default:
+        return _isCjkDominant(text) ? TextAlign.justify : TextAlign.start;
+    }
+  }
+
+  bool _isCjkDominant(String text) {
+    if (text.isEmpty) {
+      return true;
+    }
+    final cjk = RegExp(r'[\u4E00-\u9FFF]').allMatches(text).length;
+    if (cjk == 0) {
+      return false;
+    }
+    return cjk / text.length >= 0.16;
+  }
+
+  double _paragraphIndentWidthForText(String text) {
+    if (!_paragraphIndentEnabled) {
+      return 0;
+    }
+    if (_isCjkDominant(text)) {
+      return _contentFontSize * 2.0;
+    }
+    return _contentFontSize * 1.3;
+  }
+
   EdgeInsets get _contentPadding {
     final width = MediaQuery.maybeOf(context)?.size.width ?? 390;
     final horizontalBase = (width * 0.06).clamp(14.0, 30.0);
@@ -2815,6 +3210,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return heights[_lineHeightPreset.clamp(0, heights.length - 1)];
   }
 
+  String? get _contentFontFamily {
+    switch (_fontStylePreset) {
+      case 1:
+        return 'serif';
+      case 2:
+        return 'monospace';
+      default:
+        return null;
+    }
+  }
+
   double get _contentMaxWidth {
     final media = MediaQuery.of(context);
     return max(120.0, media.size.width - _contentPadding.horizontal);
@@ -2832,8 +3238,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   double get _paginationSafetyInset {
-    final byFont = _contentFontSize * 0.7;
-    return byFont.clamp(10.0, 22.0);
+    // Keep only a small guard band now that pagination/rendering models are aligned.
+    final byFont = _contentFontSize * 0.24;
+    return byFont.clamp(3.0, 8.0);
   }
 
   Color get _readerBgColor {

@@ -11,7 +11,7 @@ class AppConstants {
 
   static const String ttsBaseUrl = String.fromEnvironment(
     'TTS_BASE_URL',
-    defaultValue: 'http://192.168.2.40:3000',
+    defaultValue: 'http://8.136.58.109:80',
   );
   static const String ttsVoice = String.fromEnvironment(
     'TTS_VOICE',
