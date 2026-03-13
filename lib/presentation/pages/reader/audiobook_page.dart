@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
@@ -34,8 +33,16 @@ class AudiobookPage extends ConsumerStatefulWidget {
   ConsumerState<AudiobookPage> createState() => _AudiobookPageState();
 }
 
-class _AudiobookPageState extends ConsumerState<AudiobookPage> {
+class _AudiobookPageState extends ConsumerState<AudiobookPage>
+    with SingleTickerProviderStateMixin {
+  static const Color _bgTop = Color(0xFF0A101B);
+  static const Color _bgBottom = Color(0xFF05070A);
+  static const Color _primaryBlue = Color(0xFF3B82F6);
+  static const Color _primaryBlueSoft = Color(0x663B82F6);
+
   Timer? _progressTimer;
+  late final AnimationController _discController;
+  bool _isDiscSpinning = false;
   int _currentPage = 0;
   int? _pageBeforeDrag;
   int? _offsetBeforeDrag;
@@ -54,10 +61,24 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
   @override
   void initState() {
     super.initState();
+    _discController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 18),
+    );
     _currentPage = widget.initialPage.clamp(0, _maxPageIndex);
     _currentOffset = widget.initialOffset.clamp(0, _safeChapterLength - 1);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await ref
+          .read(ttsProvider.notifier)
+          .selectVoiceForBook(widget.book, sampleText: _initialPlaybackText());
+      final currentTtsState = ref.read(ttsProvider);
+      if (currentTtsState.isSpeaking || currentTtsState.isPaused) {
+        if (currentTtsState.isSpeaking) {
+          _startProgressTracking();
+        }
+        return;
+      }
       final launchText = _initialPlaybackText();
       if (launchText == null || launchText.trim().isEmpty) {
         return;
@@ -69,6 +90,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _discController.dispose();
     try {
       ref.read(ttsProvider.notifier).stop();
     } catch (_) {}
@@ -266,16 +288,6 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
     );
   }
 
-  String _statusLabel(TtsAppState ttsState) {
-    if (ttsState.isSpeaking) {
-      return '正在朗读';
-    }
-    if (ttsState.isPaused) {
-      return '已暂停';
-    }
-    return '准备播放';
-  }
-
   double _safeSpeechRate(double speechRate) {
     return speechRate.clamp(0.5, 2.0);
   }
@@ -312,9 +324,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
     var tempRate = currentRate;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF12171B),
+      backgroundColor: const Color(0xFF101722),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
         return StatefulBuilder(
@@ -322,36 +334,47 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
             return SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 40,
+                      width: 42,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.24),
+                        color: Colors.white.withValues(alpha: 0.28),
                         borderRadius: BorderRadius.circular(99),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
                     Text(
                       '语速 ${tempRate.toStringAsFixed(2)}x',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.95),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '建议区间 0.9x - 1.3x',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.56),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: const Color(0xFF4D89D8),
-                        inactiveTrackColor: Colors.white.withOpacity(0.16),
+                        activeTrackColor: _primaryBlue,
+                        inactiveTrackColor: Colors.white.withValues(
+                          alpha: 0.16,
+                        ),
                         thumbColor: Colors.white,
-                        overlayColor: const Color(0xFF4D89D8).withOpacity(0.14),
-                        trackHeight: 3,
+                        overlayColor: _primaryBlue.withValues(alpha: 0.16),
+                        trackHeight: 4,
                         thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 7,
+                          enabledThumbRadius: 8,
                         ),
                       ),
                       child: Slider(
@@ -378,129 +401,406 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
     );
   }
 
+  String _voiceDisplayLabel(TtsAppState ttsState) {
+    final languageCode = _uiLanguageCode();
+    final selected = ttsState.selectedVoice;
+    final match = ttsState.availableVoices.where(
+      (voice) => voice.value == selected,
+    );
+    if (match.isNotEmpty) {
+      final voice = match.first;
+      final name = voice.localizedName(languageCode);
+      final localizedTraits = voice.localizedTraits(languageCode);
+      final trait = localizedTraits.isNotEmpty ? localizedTraits.first : null;
+      if (trait != null && trait.trim().isNotEmpty) {
+        return '$name · $trait';
+      }
+      return name;
+    }
+    return selected.isNotEmpty ? selected : '选择音色';
+  }
+
+  String _uiLanguageCode() {
+    if (!mounted) {
+      return 'zh';
+    }
+    return Localizations.localeOf(context).languageCode;
+  }
+
+  Future<void> _showVoicePickerSheet(TtsAppState ttsState) async {
+    final locale = ref
+        .read(ttsProvider.notifier)
+        .inferLocaleForBook(widget.book, sampleText: _initialPlaybackText());
+    await ref.read(ttsProvider.notifier).loadVoices(locale: locale);
+
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF101722),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final state = ref.watch(ttsProvider);
+        final voices = state.availableVoices;
+        final languageCode = Localizations.localeOf(context).languageCode;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.28),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text(
+                      '选择音色',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.95),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: state.isLoadingVoices
+                          ? null
+                          : () => ref
+                                .read(ttsProvider.notifier)
+                                .loadVoices(locale: locale),
+                      icon: Icon(
+                        Icons.refresh,
+                        color: Colors.white.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 360),
+                  child: state.isLoadingVoices
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : voices.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Text(
+                            '未获取到音色列表，请检查 TTS 服务连接。',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        )
+                      : GridView.builder(
+                          shrinkWrap: true,
+                          itemCount: voices.length,
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                childAspectRatio: 1.42,
+                              ),
+                          itemBuilder: (context, index) {
+                            final voice = voices[index];
+                            final selected = voice.value == state.selectedVoice;
+                            final traits = voice.localizedTraits(languageCode);
+                            final name = voice.localizedName(languageCode);
+
+                            return Material(
+                              color: selected
+                                  ? _primaryBlue.withValues(alpha: 0.18)
+                                  : Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () async {
+                                  final shouldRestart =
+                                      state.isSpeaking || state.isPaused;
+                                  await ref
+                                      .read(ttsProvider.notifier)
+                                      .setVoice(
+                                        voice.value,
+                                        bookId: widget.book.id,
+                                      );
+                                  if (shouldRestart) {
+                                    await _restartFromCurrentPosition();
+                                  }
+                                  if (!mounted) {
+                                    return;
+                                  }
+                                  Navigator.pop(context);
+                                  _showToast('已切换为 $name');
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    10,
+                                    12,
+                                    10,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.95,
+                                                ),
+                                                fontSize: 14,
+                                                fontWeight: selected
+                                                    ? FontWeight.w700
+                                                    : FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                          if (selected)
+                                            const Icon(
+                                              Icons.check_circle,
+                                              color: _primaryBlue,
+                                              size: 18,
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        traits.isNotEmpty
+                                            ? traits.join(' / ')
+                                            : (languageCode
+                                                      .toLowerCase()
+                                                      .startsWith('zh')
+                                                  ? '默认'
+                                                  : 'Default'),
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.66,
+                                          ),
+                                          fontSize: 12,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isAtStart() {
+    if (_isChapterMode) {
+      return _currentOffset <= 0;
+    }
+    return _currentPage <= 0;
+  }
+
+  bool _isAtEnd() {
+    if (_isChapterMode) {
+      return _currentOffset >= _safeChapterLength - 1;
+    }
+    return _currentPage >= _maxPageIndex;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final systemPadding = MediaQueryData.fromView(View.of(context)).padding;
+    final topInset = systemPadding.top;
+    final bottomInset = systemPadding.bottom;
     final ttsState = ref.watch(ttsProvider);
     final rate = _safeSpeechRate(ttsState.speechRate);
-    final chapterTitle = _displayTitle();
+    final title = _displayTitle();
+    final canPlay = _isChapterMode
+        ? _chapterText.trim().isNotEmpty
+        : (ttsState.currentText?.trim().isNotEmpty == true) ||
+              (widget.initialText?.trim().isNotEmpty == true);
+    _syncDiscAnimation(ttsState);
 
-    return Container(
-      color: const Color(0xFF05070A),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
-          child: Column(
-            children: [
-              _buildTopBar(ttsState),
-              const SizedBox(height: 18),
-              _buildBookCover(),
-              const SizedBox(height: 18),
-              Text(
-                chapterTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 38,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white.withOpacity(0.95),
-                  height: 1.05,
-                ),
-              ),
-              const Spacer(),
-              _buildMetaRow(rate),
-              const SizedBox(height: 16),
-              _buildProgressSection(),
-              const SizedBox(height: 18),
-              _buildBottomControls(ttsState),
-              const SizedBox(height: 8),
-            ],
-          ),
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_bgTop, _bgBottom],
         ),
+      ),
+      child: Stack(
+        children: [
+          _buildAmbientGlow(),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              14,
+              topInset + 20,
+              14,
+              bottomInset + 12,
+            ),
+            child: Column(
+              children: [
+                _buildTopBar(),
+                const SizedBox(height: 18),
+                _buildBookCover(),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white.withValues(alpha: 0.96),
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Spacer(),
+                _buildMetaRow(rate, ttsState),
+                const SizedBox(height: 12),
+                _buildProgressSection(),
+                const SizedBox(height: 12),
+                _buildBottomControls(ttsState, canPlay),
+                if (!canPlay) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '当前页没有可播放文本',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.58),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildTopBar(TtsAppState ttsState) {
+  Widget _buildAmbientGlow() {
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            top: -80,
+            right: -70,
+            child: Container(
+              width: 220,
+              height: 220,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [Color(0x5C3B82F6), Color(0x003B82F6)],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: -80,
+            bottom: 60,
+            child: Container(
+              width: 190,
+              height: 190,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [Color(0x4038BDF8), Color(0x0038BDF8)],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
     return Row(
       children: [
         _topIconButton(
           icon: Icons.keyboard_arrow_down_rounded,
+          tooltip: '收起听书',
           onTap: _closeWithSync,
         ),
-        Expanded(
-          child: Center(
-            child: Container(
-              height: 34,
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.06)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildModeTag('AI 阅读', true),
-                  _buildModeTag('延展收听', false),
-                ],
-              ),
-            ),
-          ),
-        ),
+        const Spacer(),
         _topIconButton(
-          icon: Icons.ios_share_outlined,
+          icon: Icons.share_outlined,
+          tooltip: '分享',
           onTap: () => _showToast('分享功能即将支持'),
         ),
         const SizedBox(width: 4),
         _topIconButton(
           icon: Icons.more_vert,
-          onTap: () => _showToast(_statusLabel(ttsState)),
+          tooltip: '更多',
+          onTap: () => _showToast('更多功能即将支持'),
         ),
       ],
     );
   }
 
-  Widget _topIconButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _topIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
     return SizedBox(
-      width: 34,
-      height: 34,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(17),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(17),
-          onTap: onTap,
-          child: Icon(icon, size: 22, color: Colors.white.withOpacity(0.88)),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModeTag(String text, bool active) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: active ? Colors.white.withOpacity(0.14) : Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Colors.white.withOpacity(active ? 0.92 : 0.64),
+      width: 36,
+      height: 36,
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            focusColor: Colors.white.withValues(alpha: 0.14),
+            child: Icon(
+              icon,
+              size: 22,
+              color: Colors.white.withValues(alpha: 0.9),
+            ),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildBookCover() {
-    final coverWidth = (MediaQuery.of(context).size.width * 0.5).clamp(
-      180.0,
-      230.0,
+    final discSize = (MediaQuery.of(context).size.width * 0.58).clamp(
+      220.0,
+      300.0,
     );
-    final coverHeight = coverWidth * 1.5;
     final coverPath = widget.book.coverPath;
     final coverFile = coverPath != null && coverPath.isNotEmpty
         ? File(coverPath)
@@ -508,27 +808,71 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
     final hasCover = coverFile != null && coverFile.existsSync();
 
     return Container(
-      width: coverWidth.toDouble(),
-      height: coverHeight.toDouble(),
+      width: discSize.toDouble(),
+      height: discSize.toDouble(),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(2),
+        shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.35),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.42),
+            blurRadius: 32,
+            offset: const Offset(0, 18),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: hasCover
-            ? Image.file(
-                coverFile,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
-              )
-            : _buildCoverPlaceholder(),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xFF273040),
+                  const Color(0xFF0E1118),
+                  const Color(0xFF242B37),
+                ],
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  width: 1,
+                ),
+              ),
+            ),
+          ),
+          RotationTransition(
+            turns: _discController,
+            child: Container(
+              width: discSize * 0.84,
+              height: discSize * 0.84,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                  width: 2,
+                ),
+              ),
+              child: ClipOval(
+                child: hasCover
+                    ? Image.file(
+                        coverFile,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
+                      )
+                    : _buildCoverPlaceholder(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -539,20 +883,21 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF2A3955), Color(0xFF121A2A)],
+          colors: [Color(0xFF273B62), Color(0xFF111C2F)],
         ),
       ),
       child: Center(
         child: Icon(
           Icons.menu_book_rounded,
-          size: 52,
-          color: Colors.white.withOpacity(0.76),
+          size: 54,
+          color: Colors.white.withValues(alpha: 0.76),
         ),
       ),
     );
   }
 
-  Widget _buildMetaRow(double rate) {
+  Widget _buildMetaRow(double rate, TtsAppState ttsState) {
+    final voiceLabel = _voiceDisplayLabel(ttsState);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -563,12 +908,12 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
         ),
         _metaAction(
           icon: Icons.record_voice_over_outlined,
-          label: 'AI男声 2025A',
-          onTap: () => _showToast('音色切换即将支持'),
+          label: voiceLabel,
+          onTap: () => _showVoicePickerSheet(ttsState),
         ),
         _metaAction(
           icon: Icons.speed_rounded,
-          label: '语速 ${rate.toStringAsFixed(1)}x',
+          label: '${rate.toStringAsFixed(1)}x',
           onTap: () => _showSpeedControlSheet(rate),
         ),
         _metaAction(
@@ -587,26 +932,31 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
   }) {
     return Expanded(
       child: SizedBox(
-        height: 56,
+        height: 54,
         child: Material(
-          color: Colors.transparent,
+          color: Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             borderRadius: BorderRadius.circular(10),
             onTap: onTap,
+            focusColor: _primaryBlueSoft,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 21, color: Colors.white.withOpacity(0.78)),
-                const SizedBox(height: 6),
+                Icon(
+                  icon,
+                  size: 21,
+                  color: Colors.white.withValues(alpha: 0.82),
+                ),
+                const SizedBox(height: 4),
                 Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.white.withOpacity(0.72),
-                    fontWeight: FontWeight.w500,
+                    color: Colors.white.withValues(alpha: 0.72),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -634,41 +984,47 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
     return Row(
       children: [
         _stepButton(
-          icon: CupertinoIcons.gobackward_15,
+          icon: Icons.replay_10_rounded,
           onTap: _isChapterMode ? () => _seekByChars(-480) : _goToPreviousPage,
+          enabled: !_isAtStart(),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${_formatDuration(currentSeconds)} / ${_formatDuration(totalSeconds)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withOpacity(0.8),
-                    fontWeight: FontWeight.w600,
+              Row(
+                children: [
+                  Text(
+                    _isChapterMode
+                        ? '章节进度 ${(ratio * 100).toStringAsFixed(0)}%'
+                        : '页码 ${_currentPage + 1}/$_safeTotalPages',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
+                  const Spacer(),
+                  Text(
+                    '${_formatDuration(currentSeconds)} / ${_formatDuration(totalSeconds)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: Colors.white.withOpacity(0.34),
-                  inactiveTrackColor: Colors.white.withOpacity(0.15),
+                  activeTrackColor: _primaryBlue,
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
                   thumbColor: Colors.white,
-                  overlayColor: Colors.white.withOpacity(0.12),
-                  trackHeight: 3,
+                  overlayColor: _primaryBlue.withValues(alpha: 0.14),
+                  trackHeight: 4,
                   thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 6,
+                    enabledThumbRadius: 7,
                   ),
                 ),
                 child: Slider(
@@ -698,37 +1054,45 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
             ],
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         _stepButton(
-          icon: CupertinoIcons.goforward_15,
+          icon: Icons.forward_10_rounded,
           onTap: _isChapterMode ? () => _seekByChars(480) : _goToNextPage,
+          enabled: !_isAtEnd(),
         ),
       ],
     );
   }
 
-  Widget _stepButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _stepButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required bool enabled,
+  }) {
     return SizedBox(
       width: 42,
       height: 42,
       child: Material(
-        color: Colors.transparent,
+        color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.02),
         borderRadius: BorderRadius.circular(21),
         child: InkWell(
           borderRadius: BorderRadius.circular(21),
-          onTap: onTap,
-          child: Icon(icon, size: 24, color: Colors.white.withOpacity(0.76)),
+          onTap: enabled ? onTap : null,
+          focusColor: _primaryBlueSoft,
+          child: Icon(
+            icon,
+            size: 24,
+            color: Colors.white.withValues(alpha: enabled ? 0.82 : 0.3),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildBottomControls(TtsAppState ttsState) {
-    final canPlay = _isChapterMode
-        ? _chapterText.trim().isNotEmpty
-        : (ttsState.currentText?.trim().isNotEmpty == true) ||
-              (widget.initialText?.trim().isNotEmpty == true);
+  Widget _buildBottomControls(TtsAppState ttsState, bool canPlay) {
     final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
+    final isLoadingAudio =
+        ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
 
     return Row(
       children: [
@@ -741,36 +1105,58 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
         _centerPlayerButton(
           icon: Icons.fast_rewind_rounded,
           onTap: _isChapterMode ? () => _seekByChars(-480) : _goToPreviousPage,
+          enabled: !_isAtStart(),
         ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 84,
-          height: 84,
-          child: Material(
-            color: canPlay
-                ? const Color(0xFF2E7FD6)
-                : const Color(0xFF2E7FD6).withOpacity(0.45),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: canPlay ? () => _togglePlayback(ttsState) : null,
-              child: Icon(
-                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                size: 42,
-                color: Colors.white,
+          width: 88,
+          height: 88,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Material(
+                color: canPlay
+                    ? _primaryBlue
+                    : _primaryBlue.withValues(alpha: 0.42),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: canPlay && !isLoadingAudio
+                      ? () => _togglePlayback(ttsState)
+                      : null,
+                  child: Icon(
+                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    size: 44,
+                    color: Colors.white,
+                  ),
+                ),
               ),
-            ),
+              if (isLoadingAudio)
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Colors.white.withValues(alpha: 0.92),
+                      ),
+                      backgroundColor: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         const SizedBox(width: 8),
         _centerPlayerButton(
           icon: Icons.fast_forward_rounded,
           onTap: _isChapterMode ? () => _seekByChars(480) : _goToNextPage,
+          enabled: !_isAtEnd(),
         ),
         const SizedBox(width: 8),
         _bottomAction(
           icon: Icons.menu_rounded,
-          label: '$_safeTotalPages 集',
+          label: '目录',
           onTap: () => _showToast('目录即将支持'),
         ),
       ],
@@ -780,17 +1166,23 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
   Widget _centerPlayerButton({
     required IconData icon,
     required VoidCallback onTap,
+    required bool enabled,
   }) {
     return Expanded(
       child: SizedBox(
         height: 52,
         child: Material(
-          color: Colors.transparent,
+          color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.02),
           borderRadius: BorderRadius.circular(26),
           child: InkWell(
             borderRadius: BorderRadius.circular(26),
-            onTap: onTap,
-            child: Icon(icon, size: 34, color: Colors.white.withOpacity(0.84)),
+            onTap: enabled ? onTap : null,
+            focusColor: _primaryBlueSoft,
+            child: Icon(
+              icon,
+              size: 34,
+              color: Colors.white.withValues(alpha: enabled ? 0.88 : 0.32),
+            ),
           ),
         ),
       ),
@@ -810,10 +1202,11 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
+          focusColor: _primaryBlueSoft,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 22, color: Colors.white.withOpacity(0.82)),
+              Icon(icon, size: 22, color: Colors.white.withValues(alpha: 0.86)),
               const SizedBox(height: 4),
               Text(
                 label,
@@ -821,7 +1214,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.white.withOpacity(0.76),
+                  color: Colors.white.withValues(alpha: 0.76),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -830,5 +1223,18 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage> {
         ),
       ),
     );
+  }
+
+  void _syncDiscAnimation(TtsAppState ttsState) {
+    final shouldSpin = ttsState.isSpeaking && !ttsState.isPaused;
+    if (shouldSpin == _isDiscSpinning) {
+      return;
+    }
+    _isDiscSpinning = shouldSpin;
+    if (shouldSpin) {
+      _discController.repeat();
+    } else {
+      _discController.stop();
+    }
   }
 }

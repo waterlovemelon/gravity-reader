@@ -6,6 +6,7 @@ import 'package:charset_converter/charset_converter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:myreader/core/providers/book_providers.dart';
+import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/data/services/txt_parser.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/flureadium_integration/epub_parser.dart';
@@ -26,8 +27,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(booksProvider.notifier).loadBooks();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await ref.read(booksProvider.notifier).loadBooks();
+      final books = ref.read(booksProvider).books;
+      await ref.read(ttsProvider.notifier).warmUpVoicesForBooks(books);
     });
   }
 
@@ -300,6 +303,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
       // Save to database
       await ref.read(booksProvider.notifier).addBook(book);
+      await ref.read(ttsProvider.notifier).warmUpVoicesForBooks(
+        ref.read(booksProvider).books,
+      );
 
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog

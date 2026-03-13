@@ -413,6 +413,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _autoPageEnabled = false;
   Timer? _autoPageTimer;
   bool _canStartTxtLoad = true;
+  bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   @override
   void initState() {
@@ -640,17 +641,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         child: Padding(
           padding: _contentPadding,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: Text(
-                  visibleText,
-                  textScaler: TextScaler.noScaling,
-                  strutStyle: _contentStrutStyle,
-                  style: TextStyle(
-                    fontSize: _contentFontSize,
-                    height: _contentLineHeight,
-                    color: _textColor,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    visibleText,
+                    textScaler: TextScaler.noScaling,
+                    strutStyle: _contentStrutStyle,
+                    textAlign: TextAlign.justify,
+                    textWidthBasis: TextWidthBasis.parent,
+                    style: TextStyle(
+                      fontSize: _contentFontSize,
+                      height: _contentLineHeight,
+                      color: _textColor,
+                    ),
                   ),
                 ),
               ),
@@ -1100,81 +1106,138 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Future<void> _showTypographyPanel() async {
+    const paddingLabels = ['紧凑', '标准', '宽松'];
+    const lineHeightLabels = ['紧凑', '舒适', '宽阔', '沉浸'];
+
     await _showReaderActionPanel(
       title: '字体设置',
       child: StatefulBuilder(
         builder: (context, setModalState) {
+          final fontSize = _fontSizePreset.clamp(16, 40);
+
+          void updateTypography({
+            int? font,
+            int? padding,
+            int? lineHeight,
+            bool repaginate = true,
+          }) {
+            setState(() {
+              if (font != null) {
+                _fontSizePreset = font.clamp(16, 40);
+              }
+              if (padding != null) {
+                _paddingPreset = padding.clamp(0, 2);
+              }
+              if (lineHeight != null) {
+                _lineHeightPreset = lineHeight.clamp(0, 3);
+              }
+            });
+            setModalState(() {});
+            _scheduleSaveReaderPreferences();
+            if (repaginate) {
+              _scheduleRepaginate();
+            }
+          }
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 10),
-              Text(
-                '字体大小（$_fontSizePreset）',
-                style: TextStyle(color: _textColor.withOpacity(0.8)),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: BoxDecoration(
+                  color: _textColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _textColor.withOpacity(0.18)),
+                ),
+                child: Text(
+                  '阅读让视线更轻松，好的排版能显著降低疲劳。',
+                  style: TextStyle(
+                    fontSize: fontSize.toDouble(),
+                    height: _contentLineHeight,
+                    color: _textColor,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              _panelSubTitle('字体大小'),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _stepButtonForTypography(
+                    icon: Icons.remove_rounded,
+                    enabled: fontSize > 16,
+                    onTap: () => updateTypography(font: fontSize - 1),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    height: 34,
+                    width: 60,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _textColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$fontSize',
+                      style: TextStyle(
+                        color: _textColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _stepButtonForTypography(
+                    icon: Icons.add_rounded,
+                    enabled: fontSize < 40,
+                    onTap: () => updateTypography(font: fontSize + 1),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               _buildSteppedSlider(
-                value: _fontSizePreset,
+                value: fontSize,
                 min: 16,
                 max: 40,
                 showDivisions: false,
-                onChanged: (v) {
-                  setState(() => _fontSizePreset = v);
-                  setModalState(() {});
-                  _scheduleSaveReaderPreferences();
-                  _scheduleRepaginate();
-                },
+                onChanged: (v) => updateTypography(font: v),
               ),
-              const SizedBox(height: 10),
-              Text('边距', style: TextStyle(color: _textColor.withOpacity(0.8))),
               const SizedBox(height: 8),
-              _buildSteppedSlider(
-                value: _paddingPreset,
-                max: 2,
-                onChanged: (v) {
-                  setState(() => _paddingPreset = v);
-                  setModalState(() {});
-                  _scheduleSaveReaderPreferences();
-                  _scheduleRepaginate();
-                },
+              _panelSubTitle('页边距'),
+              const SizedBox(height: 8),
+              _segmentedChoices(
+                labels: paddingLabels,
+                selectedIndex: _paddingPreset,
+                onSelect: (index) => updateTypography(padding: index),
               ),
               const SizedBox(height: 12),
-              Text('行距', style: TextStyle(color: _textColor.withOpacity(0.8))),
+              _panelSubTitle('行距'),
               const SizedBox(height: 8),
-              _buildSteppedSlider(
-                value: _lineHeightPreset,
-                max: 3,
-                onChanged: (v) {
-                  setState(() => _lineHeightPreset = v);
-                  setModalState(() {});
-                  _scheduleSaveReaderPreferences();
-                  _scheduleRepaginate();
-                },
+              _segmentedChoices(
+                labels: lineHeightLabels,
+                selectedIndex: _lineHeightPreset,
+                onSelect: (index) => updateTypography(lineHeight: index),
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
                     child: _actionPill(
-                      '字体样式 >',
+                      '恢复默认',
                       textColor: _textColor,
                       bgColor: _textColor.withOpacity(0.08),
+                      onTap: () =>
+                          updateTypography(font: 20, padding: 1, lineHeight: 2),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: _actionPill(
-                      '首行顶格 >',
+                      '完成',
                       textColor: _textColor,
                       bgColor: _textColor.withOpacity(0.08),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _actionPill(
-                      '左右滑动 >',
-                      textColor: _textColor,
-                      bgColor: _textColor.withOpacity(0.08),
+                      onTap: () => Navigator.of(context).pop(),
                     ),
                   ),
                 ],
@@ -1193,6 +1256,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     bool showDivisions = true,
     required ValueChanged<int> onChanged,
   }) {
+    if (_isIOS) {
+      return CupertinoSlider(
+        value: value.toDouble().clamp(min.toDouble(), max.toDouble()),
+        min: min.toDouble(),
+        max: max.toDouble(),
+        onChanged: (v) => onChanged(v.round()),
+      );
+    }
     return _buildThemedSlider(
       value: value.toDouble(),
       min: min.toDouble(),
@@ -1246,17 +1317,183 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
-  Widget _actionPill(String text, {Color? textColor, Color? bgColor}) {
-    return Container(
-      height: 42,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: bgColor ?? Colors.black.withOpacity(0.05),
+  Widget _actionPill(
+    String text, {
+    Color? textColor,
+    Color? bgColor,
+    VoidCallback? onTap,
+  }) {
+    if (_isIOS) {
+      return CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: onTap,
+        child: Container(
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bgColor ?? _textColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(21),
+          ),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: textColor ?? _textColor,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(21),
+      child: InkWell(
         borderRadius: BorderRadius.circular(21),
+        onTap: onTap,
+        child: Container(
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bgColor ?? Colors.black.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(21),
+          ),
+          child: Text(
+            text,
+            style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+          ),
+        ),
       ),
-      child: Text(
-        text,
-        style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+    );
+  }
+
+  Widget _panelSubTitle(String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        color: _textColor.withOpacity(0.85),
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  Widget _stepButtonForTypography({
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    if (_isIOS) {
+      return CupertinoButton(
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(34, 34),
+        onPressed: enabled ? onTap : null,
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: _textColor.withOpacity(enabled ? 0.1 : 0.05),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: _textColor.withOpacity(enabled ? 0.9 : 0.4),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: 34,
+      height: 34,
+      child: Material(
+        color: _textColor.withOpacity(enabled ? 0.1 : 0.05),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: enabled ? onTap : null,
+          child: Icon(
+            icon,
+            size: 18,
+            color: _textColor.withOpacity(enabled ? 0.9 : 0.4),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _segmentedChoices({
+    required List<String> labels,
+    required int selectedIndex,
+    required ValueChanged<int> onSelect,
+  }) {
+    if (_isIOS) {
+      return CupertinoSlidingSegmentedControl<int>(
+        groupValue: selectedIndex,
+        thumbColor: _textColor.withOpacity(0.22),
+        backgroundColor: _textColor.withOpacity(0.1),
+        children: {
+          for (var i = 0; i < labels.length; i++)
+            i: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              child: Text(
+                labels[i],
+                style: TextStyle(
+                  color: _textColor.withOpacity(
+                    selectedIndex == i ? 0.98 : 0.72,
+                  ),
+                  fontSize: 12,
+                  fontWeight: selectedIndex == i
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                ),
+              ),
+            ),
+        },
+        onValueChanged: (value) {
+          if (value != null) {
+            onSelect(value);
+          }
+        },
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _textColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: List.generate(labels.length, (index) {
+          final selected = selectedIndex == index;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onSelect(index),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? _textColor.withOpacity(0.18)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  labels[index],
+                  style: TextStyle(
+                    color: _textColor.withOpacity(selected ? 0.95 : 0.68),
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -1337,22 +1574,42 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       return;
     }
 
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+      overlays: SystemUiOverlay.values,
+    );
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+    );
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true,
+      useSafeArea: false,
       backgroundColor: Colors.transparent,
-      builder: (context) => AudiobookPage(
-        book: book,
-        initialText: launchData.initialText,
-        initialPage: _currentPage,
-        totalPages: totalPages,
-        chapterTitle: launchData.chapterTitle,
-        chapterText: launchData.chapterText,
-        chapterIndex: launchData.chapterIndex,
-        initialOffset: launchData.initialOffset,
-      ),
+      builder: (context) {
+        final screenHeight = MediaQuery.sizeOf(context).height;
+        return SizedBox(
+          height: screenHeight,
+          child: AudiobookPage(
+            book: book,
+            initialText: launchData.initialText,
+            initialPage: _currentPage,
+            totalPages: totalPages,
+            chapterTitle: launchData.chapterTitle,
+            chapterText: launchData.chapterText,
+            chapterIndex: launchData.chapterIndex,
+            initialOffset: launchData.initialOffset,
+          ),
+        );
+      },
     );
+
+    _applySystemUiVisibility();
 
     if (result != null) {
       _handleAudiobookResult(result);

@@ -1,0 +1,7 @@
+{
+  "TTS_BASE_URL": "http://192.168.2.40:3000",
+  "TTS_TOKEN": "",
+  "TTS_VOICE": "Microsoft Server Speech Text to Speech Voice (zh-CN, XiaoxiaoNeural)",
+  "TTS_CLOUD_TIMEOUT_MS": "8000",
+  "TTS_CLOUD_RETRY_COOLDOWN_MS": "30000"
+}

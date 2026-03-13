@@ -43,6 +43,7 @@ build/
 # Logs and local files
 *.log
 .DS_Store
+env/dart_defines.local.json
 **/android/build/**
 .sisyphus/boulder.json
 .sisyphus/task-context-T1.md
