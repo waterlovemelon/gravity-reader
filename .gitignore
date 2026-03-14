@@ -9,6 +9,9 @@ build/
 .flutter-plugins
 .flutter-plugins-dependencies
 
+# Lock files (uncomment if you prefer not to commit them)
+# pubspec.lock
+
 # Generated files
 **/generated_plugin_registrant.dart
 
@@ -30,10 +33,13 @@ build/
 **/ios/Flutter/Generated.xcconfig
 **/ios/Flutter/ephemeral/
 **/ios/Pods/
+ios/Podfile.lock
 **/ios/.symlinks/
 **/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/build/
 **/macos/Flutter/ephemeral/
 **/macos/Pods/
+macos/Podfile.lock
 **/macos/.symlinks/
 
 # Linux/Windows

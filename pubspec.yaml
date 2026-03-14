@@ -34,10 +34,12 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  
+  integration_test:
+    sdk: flutter
+
   # Mocking
   mocktail: ^1.0.0
-  
+
   # Build runner
   build_runner: ^2.4.0
 

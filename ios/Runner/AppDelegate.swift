@@ -231,10 +231,15 @@ extension AppDelegate: AVSpeechSynthesizerDelegate {
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        // 可以在这里更新朗读进度
         let text = String(utterance.speechString)
         let currentText = (text as NSString).substring(with: characterRange)
         print("📖 朗读进度: \(characterRange.location) - \(characterRange.location + characterRange.length) / \(text.count)")
         print("当前语音: '\(currentText)'")
+        DispatchQueue.main.async {
+            self.ttsChannel?.invokeMethod("onProgress", arguments: [
+                "position": characterRange.location,
+                "total": text.count
+            ])
+        }
     }
 }

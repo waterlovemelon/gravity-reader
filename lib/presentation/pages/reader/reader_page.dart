@@ -80,6 +80,11 @@ class _AudiobookLaunchData {
   final String? chapterText;
   final int? chapterIndex;
   final int initialOffset;
+  final int lookbackStartOffset;
+  final String? nextChapterTitle;
+  final String? nextChapterText;
+  final int? nextChapterIndex;
+  final List<AudiobookChapterPayload> chapterQueue;
 
   const _AudiobookLaunchData({
     required this.initialText,
@@ -87,6 +92,25 @@ class _AudiobookLaunchData {
     this.chapterText,
     this.chapterIndex,
     this.initialOffset = 0,
+    this.lookbackStartOffset = 0,
+    this.nextChapterTitle,
+    this.nextChapterText,
+    this.nextChapterIndex,
+    this.chapterQueue = const <AudiobookChapterPayload>[],
+  });
+}
+
+class _ThemeOption {
+  final int id;
+  final Color color;
+  final String name;
+  final IconData icon;
+
+  const _ThemeOption({
+    required this.id,
+    required this.color,
+    required this.name,
+    required this.icon,
   });
 }
 
@@ -119,7 +143,15 @@ Map<String, dynamic> _prepareTxtChapterData(String text) {
 }
 
 String _normalizeParagraphSpacing(String text) {
-  return text.replaceAll(RegExp(r'\n{2,}'), '\n\n\n\n');
+  var processed = text.replaceAll(RegExp(r'\n{2,}'), '\n\n\n\n');
+
+  // Remove leading empty lines
+  processed = processed.replaceFirst(RegExp(r'^\n+'), '');
+
+  // Remove trailing empty lines
+  processed = processed.replaceFirst(RegExp(r'\n+$'), '');
+
+  return processed;
 }
 
 class _TableOfContentsSheet extends StatefulWidget {
@@ -542,6 +574,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       return _buildOpeningView(book);
     }
 
+    final ttsState = ref.watch(ttsProvider);
     final totalPages = _resolveTotalPages(book);
     if (_enablePageCountMode && _isTxtBook(book) && _txtChapters.isNotEmpty) {
       _ensureTxtPagination();
@@ -577,7 +610,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                   _scheduleSaveTxtProgress(book);
                 }
               },
-              itemBuilder: (context, index) => _buildPageContent(index, book),
+              itemBuilder: (context, index) =>
+                  _buildPageContent(index, book, ttsState),
             ),
           ),
           _buildTopBar(book),
@@ -590,8 +624,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 color: Colors.black.withOpacity((0.5 - _brightnessValue) * 0.9),
               ),
             ),
-          // 悬浮听书按钮
+          // 悬浮听书按钮(非播放时显示)
           _buildFloatingAudiobookButton(book, totalPages),
+          // 悬浮播放控制按钮(播放时显示)
+          _buildPlaybackControlButton(book, totalPages),
         ],
       ),
     );
@@ -625,7 +661,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
-  Widget _buildPageContent(int index, Book book) {
+  Widget _buildPageContent(int index, Book book, TtsAppState ttsState) {
     if (_isTxtBook(book) && _txtPages.isNotEmpty) {
       final page = _txtPages[index];
       final chapter = _txtChapterByIndex[page.chapterIndex];
@@ -635,21 +671,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       final showChapterHeader =
           page.startOffset == 0 ||
           (index > 0 && _txtPages[index - 1].chapterIndex != page.chapterIndex);
+      final isLastPageOfChapter =
+          safeEnd >= chapterText.length ||
+          (index < _txtPages.length - 1 &&
+              _txtPages[index + 1].chapterIndex != page.chapterIndex);
+      final endsAtParagraphBoundary = _endsAtParagraphBoundary(
+        chapterText: chapterText,
+        endOffset: safeEnd,
+      );
       final visibleText = _visiblePageBodyText(
         chapterText: chapterText,
         start: safeStart,
         end: safeEnd,
         showChapterHeader: showChapterHeader,
         chapterTitle: page.title,
+        isLastPageOfChapter: isLastPageOfChapter,
       );
-      final pageTextAlign = _resolveTextAlign(visibleText);
+      final pageTextAlign = _resolveTextAlign(
+        visibleText,
+        endsAtParagraphBoundary: endsAtParagraphBoundary,
+        isLastPageOfChapter: isLastPageOfChapter,
+      );
       final bodyStyle = TextStyle(
         fontSize: _contentFontSize,
         height: _contentLineHeight,
         color: _textColor,
         fontFamily: _contentFontFamily,
       );
+      final highlightRange = _resolveTtsHighlightRange(
+        ttsState: ttsState,
+        chapterText: chapterText,
+        pageStart: safeStart,
+        pageEnd: safeEnd,
+        visibleText: visibleText,
+      );
       return SafeArea(
+        key: ValueKey(
+          'reader-page-$index-'
+          '${ttsState.isSpeaking}-${ttsState.isPaused}-'
+          '${(ttsState.playbackProgress * 1000).round()}',
+        ),
         child: Padding(
           padding: _contentPadding,
           child: Column(
@@ -661,7 +722,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                   child: RichText(
                     textScaler: TextScaler.noScaling,
                     textAlign: pageTextAlign,
-                    textWidthBasis: TextWidthBasis.parent,
+                    textWidthBasis: TextWidthBasis.longestLine,
                     strutStyle: _contentStrutStyle,
                     text: TextSpan(
                       style: bodyStyle,
@@ -673,6 +734,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                           chapterText: chapterText,
                           startOffset: safeStart,
                         ),
+                        highlightStart: highlightRange?.start,
+                        highlightEnd: highlightRange?.end,
                       ),
                     ),
                   ),
@@ -739,10 +802,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                           minHeight: 32,
                         ),
                         iconSize: 20,
-                        icon: const Icon(
-                          Icons.arrow_back,
-                          color: Colors.black87,
-                        ),
+                        icon: Icon(Icons.arrow_back, color: _textColor),
                         onPressed: () async {
                           await _persistCurrentBookProgress(book);
                           if (mounted) {
@@ -756,9 +816,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                           book.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
-                            color: Colors.black87,
+                            color: _textColor,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -880,11 +940,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     required VoidCallback onTap,
     bool active = false,
   }) {
+    // 黑色背景时用更亮的颜色，浅色背景时用深色
+    final baseColor = _themeIndex == 3
+        ? Colors.white70
+        : const Color(0xFF1F2A1F);
     return IconButton(
       visualDensity: VisualDensity.compact,
       iconSize: 24,
       splashRadius: 22,
-      color: active ? Colors.black : Colors.black87,
+      color: active ? baseColor : baseColor.withOpacity(0.82),
       onPressed: onTap,
       icon: Icon(icon, weight: 50, grade: -25, opticalSize: 22),
     );
@@ -1053,7 +1117,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               });
               _updateAutoPageTimer(totalPages);
             },
-            title: const Text('自动翻页'),
+            title: Text('自动翻页', style: TextStyle(color: _textColor)),
             dense: true,
           ),
         ],
@@ -1062,63 +1126,359 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Future<void> _showThemePanel() async {
-    final colors = [
-      const Color(0xFFF3F3F3),
-      const Color(0xFFE8E2D6),
-      const Color(0xFFA6C39D),
-      const Color(0xFF111111),
+    final themeColors = [
+      _ThemeOption(
+        id: 0,
+        color: const Color(0xFFF3F3F3),
+        name: '浅色',
+        icon: Icons.light_mode_rounded,
+      ),
+      _ThemeOption(
+        id: 1,
+        color: const Color(0xFFE8E2D6),
+        name: '米色',
+        icon: Icons.brightness_4_rounded,
+      ),
+      _ThemeOption(
+        id: 2,
+        color: const Color(0xFFA6C39D),
+        name: '绿色',
+        icon: Icons.nature_rounded,
+      ),
+      _ThemeOption(
+        id: 3,
+        color: const Color(0xFF111111),
+        name: '深色',
+        icon: Icons.dark_mode_rounded,
+      ),
     ];
-    await _showReaderActionPanel(
-      title: '亮度与颜色',
-      child: StatefulBuilder(
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: _controlSurfaceColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 10),
-              _buildThemedSlider(
-                value: _brightnessValue,
-                min: 0,
-                max: 1,
-                onChanged: (v) {
-                  setState(() => _brightnessValue = v);
-                  setModalState(() => _brightnessValue = v);
-                },
-              ),
-              const SizedBox(height: 2),
-              Text('颜色', style: TextStyle(color: _textColor.withOpacity(0.8))),
-              const SizedBox(height: 8),
-              Row(
-                children: List.generate(colors.length, (i) {
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() => _themeIndex = i);
-                        setModalState(() {});
-                      },
+          // Calculate background color based on current theme
+          final backgroundColor = _controlSurfaceColor;
+          final textColor = _textColor;
+
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            color: backgroundColor,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Wrap(
+                  children: [
+                    Center(
                       child: Container(
-                        height: 40,
-                        margin: EdgeInsets.only(
-                          right: i == colors.length - 1 ? 0 : 10,
-                        ),
+                        width: 38,
+                        height: 4,
                         decoration: BoxDecoration(
-                          color: colors[i],
-                          borderRadius: BorderRadius.circular(11),
-                          border: Border.all(
-                            color: i == _themeIndex
-                                ? const Color(0xFF3A8B2A)
-                                : Colors.transparent,
-                            width: 2,
-                          ),
+                          color: textColor.withOpacity(0.22),
+                          borderRadius: BorderRadius.circular(999),
                         ),
                       ),
                     ),
-                  );
-                }),
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Text(
+                        '亮度与颜色',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 12),
+                        // Brightness card with modern slider
+                        Container(
+                          decoration: BoxDecoration(
+                            color: _readerBgColor,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 15,
+                                offset: const Offset(0, 5),
+                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 36,
+                                          height: 36,
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: _textColor.withOpacity(0.06),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.brightness_6_rounded,
+                                            size: 18,
+                                            color: _textColor.withOpacity(0.7),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          '亮度',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                            color: _textColor,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(
+                                          0xFF3B82F6,
+                                        ).withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        '${(_brightnessValue * 100).round()}%',
+                                        style: TextStyle(
+                                          color: const Color(0xFF3B82F6),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Modern brightness slider with icons
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.brightness_2_rounded,
+                                      size: 20,
+                                      color: _textColor.withOpacity(0.4),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      flex: 3,
+                                      child: Theme(
+                                        data: Theme.of(context).copyWith(
+                                          sliderTheme: SliderThemeData(
+                                            activeTrackColor: const Color(
+                                              0xFF3B82F6,
+                                            ),
+                                            inactiveTrackColor: _textColor
+                                                .withOpacity(0.15),
+                                            thumbColor: const Color(0xFF3B82F6),
+                                            overlayColor: const Color(
+                                              0xFF3B82F6,
+                                            ).withOpacity(0.1),
+                                            trackHeight: 4,
+                                            thumbShape:
+                                                const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 10,
+                                                ),
+                                            overlayShape:
+                                                const RoundSliderOverlayShape(
+                                                  overlayRadius: 18,
+                                                ),
+                                            showValueIndicator:
+                                                ShowValueIndicator
+                                                    .onlyForDiscrete,
+                                          ),
+                                        ),
+                                        child: Slider(
+                                          value: _brightnessValue,
+                                          min: 0,
+                                          max: 1,
+                                          divisions: 20,
+                                          label:
+                                              '${(_brightnessValue * 100).round()}%',
+                                          onChanged: (v) {
+                                            setState(
+                                              () => _brightnessValue = v,
+                                            );
+                                            setModalState(
+                                              () => _brightnessValue = v,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Icon(
+                                      Icons.brightness_7_rounded,
+                                      size: 20,
+                                      color: _textColor.withOpacity(0.4),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Theme color selection - 2x2 grid
+                        SizedBox(
+                          height: 160,
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _ColorOptionCard(
+                                      theme: themeColors[0],
+                                      isSelected: _themeIndex == 0,
+                                      onTap: () {
+                                        setState(() => _themeIndex = 0);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _ColorOptionCard(
+                                      theme: themeColors[1],
+                                      isSelected: _themeIndex == 1,
+                                      onTap: () {
+                                        setState(() => _themeIndex = 1);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _ColorOptionCard(
+                                      theme: themeColors[2],
+                                      isSelected: _themeIndex == 2,
+                                      onTap: () {
+                                        setState(() => _themeIndex = 2);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _ColorOptionCard(
+                                      theme: themeColors[3],
+                                      isSelected: _themeIndex == 3,
+                                      onTap: () {
+                                        setState(() => _themeIndex = 3);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _ColorOptionCard({
+    required _ThemeOption theme,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.color,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isSelected ? const Color(0xFF3B82F6) : Colors.transparent,
+              width: isSelected ? 3 : 0,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF3B82F6).withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  theme.icon,
+                  size: 28,
+                  color: theme.id == 3
+                      ? Colors.white.withOpacity(0.9)
+                      : Colors.black87.withOpacity(0.7),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  theme.name,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    color: theme.id == 3
+                        ? Colors.white.withOpacity(0.9)
+                        : Colors.black87.withOpacity(0.7),
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1165,87 +1525,158 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 8),
-              Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                    decoration: BoxDecoration(
-                      color: _textColor.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(28),
+              const SizedBox(height: 12),
+              // Font size card with modern Bento Grid style
+              Container(
+                decoration: BoxDecoration(
+                  color: _readerBgColor,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
                     ),
-                    child: Row(
-                      children: [
-                        Text(
-                          'A',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: _textColor.withOpacity(0.78),
-                            fontWeight: FontWeight.w500,
+                  ],
+                ),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // Header label
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '字体大小',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: _textColor,
+                              letterSpacing: 0.3,
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: _buildSteppedSlider(
-                            value: fontSize,
-                            min: 16,
-                            max: 40,
-                            showDivisions: false,
-                            onChanged: (v) => updateTypography(font: v),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3B82F6).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$fontSize',
+                              style: TextStyle(
+                                color: const Color(0xFF3B82F6),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                        Text(
-                          'A',
-                          style: TextStyle(
-                            fontSize: 34,
-                            color: _textColor.withOpacity(0.78),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    width: 64,
-                    height: 64,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _readerBgColor,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      '$fontSize',
-                      style: TextStyle(
-                        color: _textColor.withOpacity(0.95),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    // Slider with preview
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _textColor.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'A',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: _textColor.withOpacity(0.7),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: Theme(
+                              data: Theme.of(context).copyWith(
+                                sliderTheme: SliderThemeData(
+                                  activeTrackColor: const Color(0xFF3B82F6),
+                                  inactiveTrackColor: _textColor.withOpacity(
+                                    0.15,
+                                  ),
+                                  thumbColor: const Color(0xFF3B82F6),
+                                  overlayColor: const Color(
+                                    0xFF3B82F6,
+                                  ).withOpacity(0.1),
+                                  trackHeight: 4,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 10,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 18,
+                                  ),
+                                  showValueIndicator:
+                                      ShowValueIndicator.onlyForDiscrete,
+                                ),
+                              ),
+                              child: Slider(
+                                value: fontSize.toDouble(),
+                                min: 16,
+                                max: 40,
+                                divisions: 12,
+                                label: '$fontSize',
+                                onChanged: (v) =>
+                                    updateTypography(font: v.round()),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            width: 40,
+                            height: 40,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _textColor.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'A',
+                              style: TextStyle(
+                                fontSize: 26,
+                                color: _textColor.withOpacity(0.7),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
+              // Quick settings cards in 2-column grid
               Row(
                 children: [
                   Expanded(
-                    child: _segmentedChoices(
+                    child: _modernSegmentCard(
+                      label: '边距',
                       labels: paddingLabels,
                       selectedIndex: _paddingPreset,
                       onSelect: (index) => updateTypography(padding: index),
+                      icon: Icons.format_indent_increase_rounded,
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _segmentedChoices(
+                    child: _modernSegmentCard(
+                      label: '行距',
                       labels: lineHeightLabels,
                       selectedIndex: lineHeightDisplayIndex,
                       onSelect: (index) {
@@ -1256,16 +1687,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                             : 3;
                         updateTypography(lineHeight: mapped);
                       },
+                      icon: Icons.format_line_spacing_rounded,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
+              // Additional settings row
               Row(
                 children: [
                   Expanded(
-                    child: _settingEntryButton(
-                      label: '字体样式',
+                    child: _modernSettingCard(
+                      title: '字体样式',
+                      subtitle: '默认', // TODO: Get current font style
+                      icon: Icons.text_fields_rounded,
                       onTap: () async {
                         await _showFontStyleAndLayoutPanel();
                         if (mounted) {
@@ -1274,10 +1709,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: _settingEntryButton(
-                      label: _paragraphIndentEnabled ? '首行缩进' : '首行顶格',
+                    child: _modernSettingCard(
+                      title: '首行设置',
+                      subtitle: _paragraphIndentEnabled ? '缩进' : '顶格',
+                      icon: Icons.format_align_left_rounded,
                       onTap: () async {
                         await _showParagraphIndentPanel();
                         if (mounted) {
@@ -1288,22 +1725,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              Text(
-                '当前字号 $fontSize',
-                style: TextStyle(
-                  color: _textColor.withOpacity(0.72),
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 20),
+              // Action buttons
               Row(
                 children: [
                   Expanded(
-                    child: _actionPill(
-                      '恢复默认',
-                      textColor: _textColor,
-                      bgColor: _textColor.withOpacity(0.08),
+                    child: _modernActionButton(
+                      label: '恢复默认',
+                      isSecondary: false,
                       onTap: () {
                         setState(() {
                           _fontSizePreset = 20;
@@ -1319,12 +1748,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: _actionPill(
-                      '完成',
-                      textColor: _textColor,
-                      bgColor: _textColor.withOpacity(0.08),
+                    child: _modernActionButton(
+                      label: '完成',
+                      isSecondary: true,
                       onTap: () => Navigator.of(context).pop(),
                     ),
                   ),
@@ -1333,6 +1761,222 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _modernSegmentCard({
+    required String label,
+    required List<String> labels,
+    required int selectedIndex,
+    required ValueChanged<int> onSelect,
+    required IconData icon,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _readerBgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: _textColor.withOpacity(0.6)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _textColor.withOpacity(0.8),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(labels.length, (index) {
+              final isSelected = index == selectedIndex;
+              return GestureDetector(
+                onTap: () => onSelect(index),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF3B82F6)
+                        : _textColor.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF3B82F6).withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Text(
+                    labels[index],
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      color: isSelected
+                          ? Colors.white
+                          : _textColor.withOpacity(0.7),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _modernSettingCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: _readerBgColor,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _textColor.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: _textColor.withOpacity(0.7)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _textColor,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        color: _textColor.withOpacity(0.6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 22,
+                color: _textColor.withOpacity(0.4),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _modernActionButton({
+    required String label,
+    required bool isSecondary,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          height: 52,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSecondary
+                ? const Color(0xFF3B82F6)
+                : _textColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: isSecondary
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF3B82F6).withOpacity(0.25),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: isSecondary ? Colors.white : _textColor,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              if (!isSecondary) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.refresh_rounded,
+                  size: 16,
+                  color: _textColor.withOpacity(0.6),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1531,12 +2175,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         children: [
           Text(
             value,
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w600,
+              color: _textColor,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
             label,
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 13, color: _textColor.withOpacity(0.65)),
           ),
         ],
       ),
@@ -1581,12 +2229,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           height: 42,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: bgColor ?? Colors.black.withOpacity(0.05),
+            color: bgColor ?? _textColor.withOpacity(0.08),
             borderRadius: BorderRadius.circular(21),
           ),
           child: Text(
             text,
-            style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: textColor ?? _textColor,
+            ),
           ),
         ),
       ),
@@ -1720,7 +2371,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   _AudiobookLaunchData? _buildAudiobookLaunchData(Book book) {
     if (_isTxtBook(book) && _txtPages.isNotEmpty) {
-      final page = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
+      final pageIndex = _currentPage.clamp(0, _txtPages.length - 1);
+      final page = _txtPages[pageIndex];
       final chapter = _txtChapterByIndex[page.chapterIndex];
       final chapterText = chapter?.content ?? '';
       if (chapterText.trim().isEmpty) {
@@ -1733,12 +2385,48 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           ? chapterText.substring(safeStart, safeEnd)
           : chapterText.substring(safeStart);
 
+      var lookbackStartOffset = safeStart;
+      if (pageIndex > 0) {
+        final previousPage = _txtPages[pageIndex - 1];
+        if (previousPage.chapterIndex == page.chapterIndex) {
+          lookbackStartOffset = previousPage.startOffset.clamp(0, safeStart);
+        }
+      }
+      String? nextChapterTitle;
+      String? nextChapterText;
+      int? nextChapterIndex;
+      final chapterQueue = _txtChapters
+          .where((item) => item.content.trim().isNotEmpty)
+          .map(
+            (item) => AudiobookChapterPayload(
+              title: item.title,
+              text: item.content,
+              index: item.index,
+            ),
+          )
+          .toList(growable: false);
+      final currentChapterPos = _txtChapters.indexWhere(
+        (item) => item.index == page.chapterIndex,
+      );
+      if (currentChapterPos >= 0 &&
+          currentChapterPos + 1 < _txtChapters.length) {
+        final nextChapter = _txtChapters[currentChapterPos + 1];
+        nextChapterTitle = nextChapter.title;
+        nextChapterText = nextChapter.content;
+        nextChapterIndex = nextChapter.index;
+      }
+
       return _AudiobookLaunchData(
         initialText: preview.isEmpty ? chapterText : preview,
         chapterTitle: page.title,
         chapterText: chapterText,
         chapterIndex: page.chapterIndex,
         initialOffset: safeStart,
+        lookbackStartOffset: lookbackStartOffset,
+        nextChapterTitle: nextChapterTitle,
+        nextChapterText: nextChapterText,
+        nextChapterIndex: nextChapterIndex,
+        chapterQueue: chapterQueue,
       );
     }
 
@@ -1785,6 +2473,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             chapterText: launchData.chapterText,
             chapterIndex: launchData.chapterIndex,
             initialOffset: launchData.initialOffset,
+            lookbackStartOffset: launchData.lookbackStartOffset,
+            nextChapterTitle: launchData.nextChapterTitle,
+            nextChapterText: launchData.nextChapterText,
+            nextChapterIndex: launchData.nextChapterIndex,
+            chapterQueue: launchData.chapterQueue,
+            bgColor: _readerBgColor,
           ),
         );
       },
@@ -1793,11 +2487,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _applySystemUiVisibility();
 
     if (result != null) {
-      _handleAudiobookResult(result);
+      await _handleAudiobookResult(result, book, totalPages);
     }
   }
 
-  void _handleAudiobookResult(Map<String, dynamic> result) {
+  Future<void> _handleAudiobookResult(
+    Map<String, dynamic> result,
+    Book book,
+    int totalPages,
+  ) async {
     final action = result['action'] as String?;
     final page = result['page'] as int?;
 
@@ -1815,7 +2513,35 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       if (chapterIndex != null && offset != null) {
         _jumpToTxtLocation(chapterIndex, offset);
       }
+      return;
     }
+
+    if (action == 'auto_next_txt_chapter') {
+      final currentChapterIndex = result['chapterIndex'] as int?;
+      final nextChapterIndex = _nextTxtChapterIndex(currentChapterIndex);
+      if (nextChapterIndex == null) {
+        return;
+      }
+      _jumpToTxtChapter(nextChapterIndex);
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (!mounted) {
+        return;
+      }
+      await _openAudiobookSheet(book, totalPages);
+    }
+  }
+
+  int? _nextTxtChapterIndex(int? currentChapterIndex) {
+    if (currentChapterIndex == null || _txtChapters.isEmpty) {
+      return null;
+    }
+    final currentPos = _txtChapters.indexWhere(
+      (chapter) => chapter.index == currentChapterIndex,
+    );
+    if (currentPos < 0 || currentPos + 1 >= _txtChapters.length) {
+      return null;
+    }
+    return _txtChapters[currentPos + 1].index;
   }
 
   void _jumpToTxtLocation(int chapterIndex, int offset) {
@@ -2424,12 +3150,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     TextStyle style, {
     required bool startsAtParagraphBoundary,
     bool useWidgetIndent = true,
+    int? highlightStart,
+    int? highlightEnd,
   }) {
     if (text.isEmpty) {
       return const [];
     }
     final lines = text.split('\n');
     final spans = <InlineSpan>[];
+    var textOffset = 0;
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
@@ -2450,10 +3179,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         }
       }
-      spans.add(TextSpan(text: line, style: style));
+      // 去掉段落开头的空格
+      final lineText = lineStartsParagraph && !isBlank ? line.trimLeft() : line;
+      final trimmedLeading = line.length - lineText.length;
+      spans.addAll(
+        _buildHighlightedLineSpans(
+          lineText: lineText,
+          style: style,
+          lineStartOffset: textOffset + trimmedLeading,
+          highlightStart: highlightStart,
+          highlightEnd: highlightEnd,
+        ),
+      );
       if (i < lines.length - 1) {
         spans.add(const TextSpan(text: '\n'));
       }
+      textOffset += line.length + 1;
     }
 
     return spans;
@@ -2465,6 +3206,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     String? chapterTitle,
     required bool startsAtParagraphBoundary,
     bool useWidgetIndent = true,
+    int? highlightStart,
+    int? highlightEnd,
   }) {
     final spans = <InlineSpan>[];
     final title = chapterTitle?.trim() ?? '';
@@ -2480,7 +3223,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         ),
       );
       // chapter title spacing before body
-      spans.add(const TextSpan(text: '\n\n'));
+      spans.add(const TextSpan(text: '\n'));
     }
     spans.addAll(
       _buildParagraphSpans(
@@ -2488,9 +3231,172 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         bodyStyle,
         startsAtParagraphBoundary: startsAtParagraphBoundary,
         useWidgetIndent: useWidgetIndent,
+        highlightStart: highlightStart,
+        highlightEnd: highlightEnd,
       ),
     );
     return spans;
+  }
+
+  List<InlineSpan> _buildHighlightedLineSpans({
+    required String lineText,
+    required TextStyle style,
+    required int lineStartOffset,
+    int? highlightStart,
+    int? highlightEnd,
+  }) {
+    if (lineText.isEmpty ||
+        highlightStart == null ||
+        highlightEnd == null ||
+        highlightEnd <= lineStartOffset ||
+        highlightStart >= lineStartOffset + lineText.length) {
+      return [TextSpan(text: lineText, style: style)];
+    }
+
+    final localStart = max(0, highlightStart - lineStartOffset);
+    final localEnd = min(lineText.length, highlightEnd - lineStartOffset);
+    if (localStart >= localEnd) {
+      return [TextSpan(text: lineText, style: style)];
+    }
+
+    final spans = <InlineSpan>[];
+    if (localStart > 0) {
+      spans.add(
+        TextSpan(text: lineText.substring(0, localStart), style: style),
+      );
+    }
+    spans.add(
+      TextSpan(
+        text: lineText.substring(localStart, localEnd),
+        style: style.copyWith(
+          backgroundColor: _ttsHighlightColor,
+          color: _ttsHighlightTextColor,
+        ),
+      ),
+    );
+    if (localEnd < lineText.length) {
+      spans.add(TextSpan(text: lineText.substring(localEnd), style: style));
+    }
+    return spans;
+  }
+
+  TextRange? _resolveTtsHighlightRange({
+    required TtsAppState ttsState,
+    required String chapterText,
+    required int pageStart,
+    required int pageEnd,
+    required String visibleText,
+  }) {
+    if (!ttsState.isSpeaking && !ttsState.isPaused) {
+      return null;
+    }
+    final currentText = ttsState.currentText?.trim();
+    if (currentText == null || currentText.isEmpty || chapterText.isEmpty) {
+      return null;
+    }
+
+    final playbackStart = ttsState.currentStartOffset;
+    if (playbackStart == null ||
+        playbackStart < 0 ||
+        playbackStart >= chapterText.length) {
+      return null;
+    }
+
+    final progressedChars = (currentText.length * ttsState.playbackProgress)
+        .floor();
+    final currentOffset = (playbackStart + progressedChars).clamp(
+      0,
+      chapterText.length,
+    );
+    if (currentOffset < pageStart || currentOffset > pageEnd) {
+      return null;
+    }
+
+    final segmentRange = _resolveTtsSegmentRange(
+      chapterText: chapterText,
+      currentOffset: currentOffset,
+    );
+    if (segmentRange == null) {
+      return null;
+    }
+
+    final highlightText = chapterText.substring(
+      segmentRange.start,
+      segmentRange.end,
+    );
+    final approximateStart = max(0, segmentRange.start - pageStart);
+    final matchedIndex = visibleText.indexOf(highlightText, approximateStart);
+    final localStart = matchedIndex >= 0 ? matchedIndex : approximateStart;
+    final localEnd = min(visibleText.length, localStart + highlightText.length);
+    if (localStart >= localEnd) {
+      return null;
+    }
+    return TextRange(start: localStart, end: localEnd);
+  }
+
+  TextRange? _resolveTtsSegmentRange({
+    required String chapterText,
+    required int currentOffset,
+  }) {
+    if (chapterText.isEmpty) {
+      return null;
+    }
+
+    final safeOffset = currentOffset
+        .clamp(0, max(0, chapterText.length - 1))
+        .toInt();
+    var start = safeOffset;
+    while (start > 0) {
+      final char = chapterText[start - 1];
+      if (_isTtsSegmentBoundary(char)) {
+        break;
+      }
+      start--;
+    }
+
+    while (start < safeOffset && chapterText[start].trim().isEmpty) {
+      start++;
+    }
+
+    var end = safeOffset;
+    while (end < chapterText.length) {
+      final char = chapterText[end];
+      end++;
+      if (_isTtsSegmentBoundary(char)) {
+        break;
+      }
+    }
+
+    while (end > start && chapterText[end - 1].trim().isEmpty) {
+      end--;
+    }
+
+    if (start >= end) {
+      return null;
+    }
+    return TextRange(start: start, end: end);
+  }
+
+  bool _isTtsSegmentBoundary(String char) {
+    const boundaries = <String>{
+      '。',
+      '！',
+      '？',
+      '.',
+      '!',
+      '?',
+      '；',
+      ';',
+      '…',
+      '，',
+      ',',
+      '、',
+      ':',
+      '：',
+      '\n',
+      '\r',
+    };
+    return boundaries.contains(char);
   }
 
   String _paragraphIndentPrefixForText(String text) {
@@ -2506,16 +3412,59 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     required int end,
     required bool showChapterHeader,
     required String chapterTitle,
+    required bool isLastPageOfChapter,
   }) {
     final safeStart = start.clamp(0, chapterText.length);
     final safeEnd = end.clamp(safeStart, chapterText.length);
     final raw = safeEnd > safeStart
         ? chapterText.substring(safeStart, safeEnd)
         : '';
+
     if (!showChapterHeader) {
-      return raw;
+      return _trimEmptyLines(raw, removeTrailingLineBreak: isLastPageOfChapter);
     }
-    return _stripDuplicatedLeadingTitle(raw, chapterTitle);
+
+    var processed = _stripDuplicatedLeadingTitle(raw, chapterTitle);
+    return _trimEmptyLines(
+      processed,
+      removeTrailingLineBreak: isLastPageOfChapter,
+    );
+  }
+
+  String _trimEmptyLines(String text, {bool removeTrailingLineBreak = false}) {
+    // Remove leading empty lines
+    var result = text.replaceFirst(RegExp(r'^\n+'), '');
+
+    // Remove trailing empty lines (keep at most 1 for paragraph spacing)
+    if (result.endsWith('\n\n')) {
+      result = result.substring(0, result.length - 1);
+    }
+
+    // If this is the last page of a chapter, remove the trailing line break
+    // so the last line gets justified instead of being hard-aligned left
+    if (removeTrailingLineBreak && result.endsWith('\n')) {
+      result = result.substring(0, result.length - 1);
+    }
+
+    return result;
+  }
+
+  int _findLastNonEmptyLineEnd(String text, int start, int end) {
+    var result = end;
+    while (result > start) {
+      final prevBreak = text.lastIndexOf('\n', result - 1);
+      if (prevBreak < start) {
+        break;
+      }
+      final lineEnd = result;
+      final lineStart = prevBreak + 1;
+      final line = text.substring(lineStart, lineEnd).trim();
+      if (line.isNotEmpty) {
+        break;
+      }
+      result = lineStart;
+    }
+    return result;
   }
 
   bool _startsAtParagraphBoundary({
@@ -2544,6 +3493,30 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return prevLine.isEmpty;
   }
 
+  bool _endsAtParagraphBoundary({
+    required String chapterText,
+    required int endOffset,
+  }) {
+    if (endOffset >= chapterText.length) {
+      return true;
+    }
+    if (endOffset <= 0) {
+      return false;
+    }
+
+    // Check if endOffset is at a line break (paragraph border)
+    if (endOffset < chapterText.length && chapterText[endOffset] == '\n') {
+      return true;
+    }
+
+    // Check if the previous character is a line break
+    if (endOffset > 0 && chapterText[endOffset - 1] == '\n') {
+      return true;
+    }
+
+    return false;
+  }
+
   String _stripDuplicatedLeadingTitle(String text, String title) {
     final trimmedTitle = title.trim();
     if (trimmedTitle.isEmpty || text.trim().isEmpty) {
@@ -2570,8 +3543,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   StrutStyle get _contentStrutStyle => StrutStyle(
     fontSize: _contentFontSize,
     height: _contentLineHeight,
-    forceStrutHeight: true,
-    leading: 0.1,
+    forceStrutHeight: false,
+    leading: 0,
   );
 
   Future<List<_TxtPage>> _paginateSingleChapterAsync({
@@ -2642,14 +3615,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     bool fits(int candidateEnd) {
       final showChapterHeader = start == 0;
+      final isLastPageOfChapter = candidateEnd >= length;
+      final endsAtParagraphBoundary = _endsAtParagraphBoundary(
+        chapterText: text,
+        endOffset: candidateEnd,
+      );
       final visibleText = _visiblePageBodyText(
         chapterText: text,
         start: start,
         end: candidateEnd,
         showChapterHeader: showChapterHeader,
         chapterTitle: chapterTitle,
+        isLastPageOfChapter: isLastPageOfChapter,
       );
-      final pageTextAlign = _resolveTextAlign(visibleText);
+      final pageTextAlign = _resolveTextAlign(
+        visibleText,
+        endsAtParagraphBoundary: endsAtParagraphBoundary,
+        isLastPageOfChapter: isLastPageOfChapter,
+      );
       final painter = TextPainter(
         text: TextSpan(
           style: style,
@@ -2666,7 +3649,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         ),
         textDirection: TextDirection.ltr,
         textAlign: pageTextAlign,
-        textWidthBasis: TextWidthBasis.parent,
+        textWidthBasis: TextWidthBasis.longestLine,
         maxLines: null,
         textScaler: TextScaler.noScaling,
         strutStyle: _contentStrutStyle,
@@ -2709,7 +3692,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       }
     }
 
-    return low.clamp(start + 1, length);
+    final trimmedEnd = _findLastNonEmptyLineEnd(text, start, low);
+    return trimmedEnd.clamp(start + 1, length);
   }
 
   int _estimateCharsPerPage({required double width, required double height}) {
@@ -3137,7 +4121,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return text.length < 80 && cjkCount >= 2;
   }
 
-  TextAlign _resolveTextAlign(String text) {
+  TextAlign _resolveTextAlign(
+    String text, {
+    required bool endsAtParagraphBoundary,
+    required bool isLastPageOfChapter,
+  }) {
     switch (_textAlignPreset) {
       case 1:
         return TextAlign.justify;
@@ -3146,7 +4134,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       case 3:
         return TextAlign.center;
       default:
-        return _isCjkDominant(text) ? TextAlign.justify : TextAlign.start;
+        // Default: always use justify for aligned right edge
+        return TextAlign.justify;
     }
   }
 
@@ -3174,8 +4163,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   EdgeInsets get _contentPadding {
     final width = MediaQuery.maybeOf(context)?.size.width ?? 390;
     final horizontalBase = (width * 0.06).clamp(14.0, 30.0);
-    final topBase = (width * 0.085).clamp(24.0, 42.0);
-    final bottomBase = (width * 0.09).clamp(30.0, 52.0);
+    final topBase = (width * 0.06).clamp(12.0, 24.0);
+    final bottomBase = (width * 0.07).clamp(24.0, 40.0);
 
     if (_paddingPreset == 0) {
       return EdgeInsets.fromLTRB(
@@ -3255,6 +4244,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   Color get _controlSurfaceColor {
     final hsl = HSLColor.fromColor(_readerBgColor);
+    // 黑色背景使用深灰色形成对比，浅色背景使用稍深的颜色
+    if (hsl.lightness < 0.2) {
+      return const Color(0xFF1A1A1A);
+    }
     final darker = (hsl.lightness - 0.06).clamp(0.0, 1.0);
     return hsl.withLightness(darker).toColor();
   }
@@ -3262,9 +4255,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   Color get _textColor =>
       _themeIndex == 3 ? Colors.white70 : const Color(0xFF1F2A1F);
 
+  Color get _ttsHighlightColor => _themeIndex == 3
+      ? const Color(0xFF4C7D5B).withValues(alpha: 0.72)
+      : const Color(0xFFBFE7A8).withValues(alpha: 0.9);
+
+  Color get _ttsHighlightTextColor =>
+      _themeIndex == 3 ? Colors.white : const Color(0xFF182118);
+
   Widget _buildFloatingAudiobookButton(Book book, int totalPages) {
     final ttsState = ref.watch(ttsProvider);
-    const buttonSize = 68.0;
+    const buttonSize = 54.0;
+
+    // 按钮背景色随主题联动
+    final buttonBgColor = _themeIndex == 3
+        ? Colors.white.withOpacity(0.15)
+        : const Color(0xFF456757).withOpacity(0.92);
+
+    // 图标颜色
+    final iconColor = _themeIndex == 3
+        ? Colors.white70
+        : Colors.white.withOpacity(0.95);
+
+    // 非播放状态才显示听书按钮
+    final shouldShow = _showControls && !ttsState.isSpeaking;
 
     return Positioned(
       right: 16,
@@ -3272,9 +4285,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
-        opacity: _showControls ? 1.0 : 0.0,
+        opacity: shouldShow ? 1.0 : 0.0,
         child: IgnorePointer(
-          ignoring: !_showControls,
+          ignoring: !shouldShow,
           child: GestureDetector(
             onTap: () async {
               await _openAudiobookSheet(book, totalPages);
@@ -3284,7 +4297,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               height: buttonSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF456757).withOpacity(0.92),
+                color: buttonBgColor,
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.2),
@@ -3298,23 +4311,83 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                   Center(
                     child: Icon(
                       Icons.headphones_rounded,
-                      size: 34,
-                      color: Colors.white.withOpacity(0.95),
+                      size: 32,
+                      color: iconColor,
                     ),
                   ),
-                  if (ttsState.isSpeaking)
-                    Positioned(
-                      right: 4,
-                      top: 4,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Color(0xFF6FCF97),
-                        ),
-                      ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaybackControlButton(Book book, int totalPages) {
+    final ttsState = ref.watch(ttsProvider);
+    const buttonSize = 54.0;
+
+    // 按钮背景色随主题联动
+    final buttonBgColor = _themeIndex == 3
+        ? Colors.white.withOpacity(0.15)
+        : const Color(0xFF456757).withOpacity(0.92);
+
+    // 图标颜色
+    final iconColor = _themeIndex == 3
+        ? Colors.white70
+        : Colors.white.withOpacity(0.95);
+
+    // 仅在播放状态时显示
+    final shouldShow = _showControls && ttsState.isSpeaking;
+
+    return Positioned(
+      left: 16,
+      bottom: mediaQueryPadding.bottom + 78,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        opacity: shouldShow ? 1.0 : 0.0,
+        child: IgnorePointer(
+          ignoring: !shouldShow,
+          child: GestureDetector(
+            onTap: () async {
+              if (ttsState.isSpeaking) {
+                // 暂停播放
+                await ref.read(ttsProvider.notifier).pause();
+              } else if (ttsState.isPaused) {
+                // 恢复播放
+                await ref.read(ttsProvider.notifier).resume();
+              } else {
+                // 开始播放
+                await _openAudiobookSheet(book, totalPages);
+              }
+            },
+            child: Container(
+              width: buttonSize,
+              height: buttonSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: buttonBgColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Center(
+                    child: Icon(
+                      ttsState.isSpeaking
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 32,
+                      color: iconColor,
                     ),
+                  ),
                   if (ttsState.isSpeaking)
                     Positioned.fill(
                       child: Center(child: _buildPulseWave(buttonSize)),
@@ -3329,6 +4402,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Widget _buildPulseWave(double baseSize) {
+    final waveColor = _themeIndex == 3 ? Colors.white : Colors.blue;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
       duration: const Duration(milliseconds: 1500),
@@ -3339,7 +4413,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: Colors.blue.withOpacity(1.0 - value),
+              color: waveColor.withOpacity(0.6 - (value * 0.6)),
               width: 2,
             ),
           ),

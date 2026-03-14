@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +13,8 @@ class TtsAppState {
   final bool isSpeaking;
   final bool isPaused;
   final String? currentText;
+  final int? currentStartOffset;
+  final double playbackProgress;
   final double speechRate;
   final double pitch;
   final double volume;
@@ -24,6 +27,8 @@ class TtsAppState {
     this.isSpeaking = false,
     this.isPaused = false,
     this.currentText,
+    this.currentStartOffset,
+    this.playbackProgress = 0.0,
     this.speechRate = 1.0,
     this.pitch = 1.0,
     this.volume = 1.0,
@@ -38,6 +43,9 @@ class TtsAppState {
     bool? isPaused,
     String? currentText,
     bool clearCurrentText = false,
+    int? currentStartOffset,
+    bool clearCurrentStartOffset = false,
+    double? playbackProgress,
     double? speechRate,
     double? pitch,
     double? volume,
@@ -50,6 +58,10 @@ class TtsAppState {
       isSpeaking: isSpeaking ?? this.isSpeaking,
       isPaused: isPaused ?? this.isPaused,
       currentText: clearCurrentText ? null : (currentText ?? this.currentText),
+      currentStartOffset: clearCurrentStartOffset
+          ? null
+          : (currentStartOffset ?? this.currentStartOffset),
+      playbackProgress: playbackProgress ?? this.playbackProgress,
       speechRate: speechRate ?? this.speechRate,
       pitch: pitch ?? this.pitch,
       volume: volume ?? this.volume,
@@ -70,6 +82,13 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
   TtsNotifier() : _ttsService = TtsService(), super(const TtsAppState()) {
     _ttsService.setStateCallback((ttsState) {
+      _trace(
+        'service state callback: ttsState=$ttsState, '
+        'before isSpeaking=${state.isSpeaking}, '
+        'isPaused=${state.isPaused}, '
+        'playbackProgress=${state.playbackProgress}, '
+        'currentTextLength=${state.currentText?.length ?? 0}',
+      );
       switch (ttsState) {
         case TtsState.playing:
           state = state.copyWith(
@@ -90,10 +109,22 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
             isSpeaking: false,
             isPaused: false,
             clearCurrentText: true,
+            clearCurrentStartOffset: true,
+            playbackProgress: 0.0,
             isLoadingAudio: false,
           );
           break;
       }
+      _trace(
+        'service state applied: ttsState=$ttsState, '
+        'after isSpeaking=${state.isSpeaking}, '
+        'isPaused=${state.isPaused}, '
+        'playbackProgress=${state.playbackProgress}, '
+        'currentTextLength=${state.currentText?.length ?? 0}',
+      );
+    });
+    _ttsService.setProgressCallback((progress) {
+      state = state.copyWith(playbackProgress: progress.clamp(0.0, 1.0));
     });
     unawaited(_initialize());
   }
@@ -120,18 +151,35 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     );
   }
 
+  void _trace(String message) {
+    final timestamp = DateTime.now().toIso8601String();
+    final formatted = '[$timestamp] [TtsNotifier] $message';
+    debugPrint(formatted);
+    developer.log(formatted, name: 'TtsNotifier');
+  }
+
   Future<void> _ensureInitialized() async {
     await _initialize();
   }
 
-  Future<void> speak(String text) async {
-    state = state.copyWith(isLoadingAudio: true);
+  Future<void> speak(String text, {int? startOffset}) async {
+    _trace('speak: textLength=${text.length}, selectedVoice=${state.selectedVoice}');
+    state = state.copyWith(
+      isSpeaking: false,
+      isPaused: false,
+      isLoadingAudio: true,
+      playbackProgress: 0.0,
+      currentText: text,
+      currentStartOffset: startOffset,
+    );
     try {
       await _ttsService.setVoice(state.selectedVoice);
       await _ttsService.speak(text);
       state = state.copyWith(
         isSpeaking: true,
         currentText: text,
+        currentStartOffset: startOffset,
+        playbackProgress: 0.0,
         isPaused: false,
         isLoadingAudio: false,
       );
@@ -142,11 +190,14 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
   Future<void> stop() async {
     try {
+      _trace('stop');
       await _ttsService.stop();
       state = state.copyWith(
         isSpeaking: false,
         isPaused: false,
         clearCurrentText: true,
+        clearCurrentStartOffset: true,
+        playbackProgress: 0.0,
         isLoadingAudio: false,
       );
     } catch (e) {
@@ -156,6 +207,10 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
   Future<void> pause() async {
     try {
+      _trace(
+        'pause: isSpeaking=${state.isSpeaking}, '
+        'isPaused=${state.isPaused}, playbackProgress=${state.playbackProgress}',
+      );
       await _ttsService.pause();
       state = state.copyWith(
         isSpeaking: false,
@@ -169,6 +224,10 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
   Future<void> resume() async {
     try {
+      _trace(
+        'resume: isSpeaking=${state.isSpeaking}, '
+        'isPaused=${state.isPaused}, playbackProgress=${state.playbackProgress}',
+      );
       await _ttsService.resume();
       state = state.copyWith(
         isSpeaking: true,
@@ -195,6 +254,16 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     state = state.copyWith(volume: volume);
   }
 
+  Future<void> preloadUpcomingText(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    _trace('preloadUpcomingText: textLength=${trimmed.length}');
+    await _ttsService.setVoice(state.selectedVoice);
+    await _ttsService.preloadUpcomingText(trimmed);
+  }
+
   Future<void> loadVoices({String? locale}) async {
     await _ensureInitialized();
     if (state.isLoadingVoices) {
@@ -206,7 +275,8 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     try {
       final voices = await _getVoicesForLocale(normalizedLocale);
       var selected = state.selectedVoice;
-      if (voices.isNotEmpty && !voices.any((voice) => voice.value == selected)) {
+      if (voices.isNotEmpty &&
+          !voices.any((voice) => voice.value == selected)) {
         selected = voices.first.value;
         await setVoice(selected);
       }
@@ -260,7 +330,9 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     final voices = await _getVoicesForLocale(locale);
     final assigned = _bookVoiceAssignments[book.id];
     if (assigned != null && voices.any((voice) => voice.value == assigned)) {
-      _log('selectVoiceForBook: using persisted book voice. bookId=${book.id}, voice=$assigned');
+      _log(
+        'selectVoiceForBook: using persisted book voice. bookId=${book.id}, voice=$assigned',
+      );
       await setVoice(assigned);
       state = state.copyWith(availableVoices: voices);
       return;
@@ -279,11 +351,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   }
 
   String inferLocaleForBook(Book book, {String? sampleText}) {
-    final raw = [
-      sampleText ?? '',
-      book.title,
-      book.author ?? '',
-    ].join(' ');
+    final raw = [sampleText ?? '', book.title, book.author ?? ''].join(' ');
     return _inferLocaleFromText(raw);
   }
 
@@ -306,7 +374,8 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         continue;
       }
       final persisted = _bookVoiceAssignments[book.id];
-      if (persisted != null && voices.any((voice) => voice.value == persisted)) {
+      if (persisted != null &&
+          voices.any((voice) => voice.value == persisted)) {
         continue;
       }
       _bookVoiceAssignments[book.id] = _resolvePreferredVoice(book, voices);

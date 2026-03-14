@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,12 @@ class AudiobookPage extends ConsumerStatefulWidget {
   final String? chapterText;
   final int? chapterIndex;
   final int initialOffset;
+  final int lookbackStartOffset;
+  final String? nextChapterTitle;
+  final String? nextChapterText;
+  final int? nextChapterIndex;
+  final List<AudiobookChapterPayload> chapterQueue;
+  final Color? bgColor;
 
   const AudiobookPage({
     super.key,
@@ -27,46 +34,142 @@ class AudiobookPage extends ConsumerStatefulWidget {
     this.chapterText,
     this.chapterIndex,
     this.initialOffset = 0,
+    this.lookbackStartOffset = 0,
+    this.nextChapterTitle,
+    this.nextChapterText,
+    this.nextChapterIndex,
+    this.chapterQueue = const <AudiobookChapterPayload>[],
+    this.bgColor,
   });
 
   @override
   ConsumerState<AudiobookPage> createState() => _AudiobookPageState();
 }
 
+class AudiobookChapterPayload {
+  final String title;
+  final String text;
+  final int index;
+
+  const AudiobookChapterPayload({
+    required this.title,
+    required this.text,
+    required this.index,
+  });
+}
+
+class _PlaybackSlice {
+  final int startOffset;
+  final String text;
+
+  const _PlaybackSlice({required this.startOffset, required this.text});
+}
+
 class _AudiobookPageState extends ConsumerState<AudiobookPage>
     with SingleTickerProviderStateMixin {
-  static const Color _bgTop = Color(0xFF0A101B);
-  static const Color _bgBottom = Color(0xFF05070A);
-  static const Color _primaryBlue = Color(0xFF3B82F6);
-  static const Color _primaryBlueSoft = Color(0x663B82F6);
+  static const Color _accentGreen = Color(0xFF10B981);
+  static const Color _accentGreenSoft = Color(0x2A16B981);
+  late final Color _bgStart;
+  late final Color _bgEnd;
+  late final Color _textPrimary;
+  late final Color _textSecondary;
+  late final Color _textTertiary;
+  late final Color _controlBgColor;
+
+  bool get _isDarkTheme {
+    return widget.bgColor != null &&
+        HSLColor.fromColor(widget.bgColor!).lightness < 0.2;
+  }
+
+  void _initColors() {
+    if (widget.bgColor == null) {
+      _bgStart = const Color(0xFFE9F1EE);
+      _bgEnd = const Color(0xFFE6F0EC);
+      _textPrimary = const Color(0xFF1F2937);
+      _textSecondary = const Color(0xFF6B7280);
+      _textTertiary = const Color(0xFF9CA3AF);
+      _controlBgColor = const Color(0xFFF5F8F6);
+    } else if (_isDarkTheme) {
+      // 黑色背景
+      _bgStart = const Color(0xFF111111);
+      _bgEnd = const Color(0xFF0A0A0A);
+      _textPrimary = Colors.white70;
+      _textSecondary = Colors.white54;
+      _textTertiary = Colors.white38;
+      _controlBgColor = const Color(0xFF1A1A1A);
+    } else {
+      // 浅色主题，基于传入的背景色
+      final baseHsl = HSLColor.fromColor(widget.bgColor!);
+      _bgStart = widget.bgColor!;
+      _bgEnd = baseHsl
+          .withLightness((baseHsl.lightness + 0.02).clamp(0.0, 1.0))
+          .toColor();
+      _textPrimary = const Color(0xFF1F2937);
+      _textSecondary = const Color(0xFF6B7280);
+      _textTertiary = const Color(0xFF9CA3AF);
+      _controlBgColor = baseHsl
+          .withLightness((baseHsl.lightness + 0.04).clamp(0.0, 1.0))
+          .toColor();
+    }
+  }
 
   Timer? _progressTimer;
   late final AnimationController _discController;
   bool _isDiscSpinning = false;
+  bool _isDraggingProgress = false;
+  ProviderSubscription<TtsAppState>? _ttsStateSubscription;
   int _currentPage = 0;
   int? _pageBeforeDrag;
   int? _offsetBeforeDrag;
   int _currentOffset = 0;
+  int _playbackStartOffset = 0;
+  double _estimatedPlaybackProgress = 0.0;
+  double _lastActivePlaybackProgress = 0.0;
+  int _lastActiveChapterOffset = 0;
+  bool _suppressAutoAdvanceOnce = false;
+  bool _autoAdvanceTriggered = false;
+  bool _nextChapterPreloadTriggered = false;
+  List<AudiobookChapterPayload> _chapterQueue =
+      const <AudiobookChapterPayload>[];
+  int _chapterQueuePos = -1;
+  String? _activeChapterTitle;
+  String? _activeChapterText;
+  int? _activeChapterIndex;
+  int _activeLookbackStartOffset = 0;
 
   bool get _isChapterMode =>
-      widget.chapterIndex != null &&
-      widget.chapterText != null &&
-      widget.chapterText!.trim().isNotEmpty;
+      _activeChapterIndex != null &&
+      _activeChapterText != null &&
+      _activeChapterText!.trim().isNotEmpty;
 
-  String get _chapterText => widget.chapterText ?? '';
+  String get _chapterText => _activeChapterText ?? '';
   int get _safeChapterLength => math.max(1, _chapterText.length);
   int get _safeTotalPages => widget.totalPages <= 0 ? 1 : widget.totalPages;
   int get _maxPageIndex => _safeTotalPages - 1;
+  int get _safeLookbackStartOffset =>
+      _activeLookbackStartOffset.clamp(0, _safeChapterLength - 1);
+  bool get _hasNextChapter =>
+      _chapterQueuePos >= 0 && _chapterQueuePos + 1 < _chapterQueue.length;
+  bool get _hasPreviousChapter => _chapterQueuePos > 0;
 
   @override
   void initState() {
     super.initState();
+    _initColors();
     _discController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
     );
+    _initializeChapterQueue();
     _currentPage = widget.initialPage.clamp(0, _maxPageIndex);
     _currentOffset = widget.initialOffset.clamp(0, _safeChapterLength - 1);
+    _playbackStartOffset = _currentOffset;
+    _ttsStateSubscription = ref.listenManual<TtsAppState>(ttsProvider, (
+      previous,
+      next,
+    ) {
+      _handleTtsStateTransition(previous, next);
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ref
@@ -83,6 +186,10 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       if (launchText == null || launchText.trim().isEmpty) {
         return;
       }
+      if (_isChapterMode) {
+        await _startSpeakingFromOffset(_currentOffset);
+        return;
+      }
       await _startSpeaking(launchText);
     });
   }
@@ -90,6 +197,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _ttsStateSubscription?.close();
     _discController.dispose();
     try {
       ref.read(ttsProvider.notifier).stop();
@@ -99,39 +207,108 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   String? _initialPlaybackText() {
     if (_isChapterMode) {
-      return _textFromOffset(_currentOffset);
+      return _playbackSliceFromOffset(_currentOffset).text;
     }
     return widget.initialText;
   }
 
-  String _textFromOffset(int offset) {
+  _PlaybackSlice _playbackSliceFromOffset(int offset) {
     if (!_isChapterMode) {
-      return (widget.initialText ?? '').trim();
+      return _PlaybackSlice(
+        startOffset: 0,
+        text: (widget.initialText ?? '').trim(),
+      );
     }
     final safeOffset = offset.clamp(0, _safeChapterLength - 1);
-    return _chapterText.substring(safeOffset).trim();
+    final playbackStart = _sentenceStartOffset(safeOffset);
+    return _PlaybackSlice(
+      startOffset: playbackStart,
+      text: _chapterText.substring(playbackStart).trim(),
+    );
   }
 
-  Future<void> _startSpeaking(String text) async {
+  int _sentenceStartOffset(int offset) {
+    if (!_isChapterMode || offset <= 0) {
+      return offset.clamp(0, _safeChapterLength - 1);
+    }
+
+    final safeOffset = offset.clamp(0, _safeChapterLength - 1);
+    final minOffset = math.min(_safeLookbackStartOffset, safeOffset);
+    for (var i = safeOffset - 1; i >= minOffset; i--) {
+      final char = _chapterText[i];
+      if (_isPauseBoundaryChar(char) || char == '\n' || char == '\r') {
+        var candidate = i + 1;
+        while (candidate < safeOffset &&
+            _chapterText[candidate].trim().isEmpty) {
+          candidate++;
+        }
+        return candidate.clamp(0, safeOffset);
+      }
+    }
+
+    return minOffset;
+  }
+
+  bool _isPauseBoundaryChar(String char) {
+    const boundaries = <String>[
+      '。',
+      '！',
+      '？',
+      '.',
+      '!',
+      '?',
+      '；',
+      ';',
+      '…',
+      '，',
+      ',',
+      '、',
+      ':',
+      '：',
+    ];
+    return boundaries.contains(char);
+  }
+
+  Future<void> _startSpeaking(String text, {int? actualStartOffset}) async {
     if (text.trim().isEmpty) {
       _showToast('当前没有可播放内容');
       return;
     }
     try {
-      await ref.read(ttsProvider.notifier).speak(text);
+      _progressTimer?.cancel();
+      final resolvedStartOffset = actualStartOffset ?? _currentOffset;
+      setState(() {
+        _playbackStartOffset = resolvedStartOffset;
+        _currentOffset = resolvedStartOffset;
+        _estimatedPlaybackProgress = 0.0;
+        _lastActivePlaybackProgress = 0.0;
+        _lastActiveChapterOffset = _playbackStartOffset;
+      });
+      await ref
+          .read(ttsProvider.notifier)
+          .speak(text, startOffset: resolvedStartOffset);
       _startProgressTracking();
     } catch (_) {
       _showToast('播放失败，请重试');
     }
   }
 
-  Future<void> _restartFromCurrentPosition() async {
-    final text = _textFromOffset(_currentOffset);
-    if (text.trim().isEmpty) {
+  Future<void> _startSpeakingFromOffset(int offset) async {
+    final slice = _playbackSliceFromOffset(offset);
+    if (slice.text.trim().isEmpty) {
+      _showToast('当前没有可播放内容');
       return;
     }
+    setState(() {
+      _currentOffset = slice.startOffset;
+    });
+    await _startSpeaking(slice.text, actualStartOffset: slice.startOffset);
+  }
+
+  Future<void> _restartFromCurrentPosition() async {
+    _suppressAutoAdvanceOnce = true;
     await ref.read(ttsProvider.notifier).stop();
-    await _startSpeaking(text);
+    await _startSpeakingFromOffset(_currentOffset);
   }
 
   void _startProgressTracking() {
@@ -144,30 +321,52 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       final state = ref.read(ttsProvider);
       if (!state.isSpeaking && !state.isPaused) {
         timer.cancel();
+        return;
+      }
+      if (state.isSpeaking) {
+        final totalSeconds = _estimatedDurationSeconds();
+        final step = totalSeconds <= 0 ? 0.0 : 1 / totalSeconds;
+        setState(() {
+          _estimatedPlaybackProgress = (_estimatedPlaybackProgress + step)
+              .clamp(0.0, 1.0);
+        });
+        _maybePreloadNextChapter(state);
       }
     });
   }
 
   Future<void> _togglePlayback(TtsAppState ttsState) async {
+    _uiLog(
+      'togglePlayback: '
+      'isSpeaking=${ttsState.isSpeaking}, '
+      'isPaused=${ttsState.isPaused}, '
+      'isLoadingAudio=${ttsState.isLoadingAudio}, '
+      'currentOffset=$_currentOffset, '
+      'playbackProgress=${ttsState.playbackProgress}',
+    );
     if (ttsState.isPaused) {
+      _uiLog('togglePlayback -> resume');
       await ref.read(ttsProvider.notifier).resume();
       _startProgressTracking();
       return;
     }
 
     if (ttsState.isSpeaking) {
+      _uiLog('togglePlayback -> pause');
       await ref.read(ttsProvider.notifier).pause();
       _progressTimer?.cancel();
       return;
     }
 
-    final text = _textFromOffset(_currentOffset);
-    await _startSpeaking(text);
+    _uiLog('togglePlayback -> startSpeakingFromOffset');
+    await _startSpeakingFromOffset(_currentOffset);
   }
 
   void _stopSpeaking() {
+    _suppressAutoAdvanceOnce = true;
     ref.read(ttsProvider.notifier).stop();
     _progressTimer?.cancel();
+    _estimatedPlaybackProgress = 0.0;
   }
 
   Future<void> _seekChapterOffset(
@@ -178,30 +377,23 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       return;
     }
     final safeOffset = targetOffset.clamp(0, _safeChapterLength - 1);
-    if (!force && safeOffset == _currentOffset) {
+    final playbackSlice = _playbackSliceFromOffset(safeOffset);
+    final resolvedOffset = playbackSlice.startOffset;
+    if (!force && resolvedOffset == _currentOffset) {
       return;
     }
 
     final ttsState = ref.read(ttsProvider);
     final shouldContinue = ttsState.isSpeaking || ttsState.isPaused;
     setState(() {
-      _currentOffset = safeOffset;
+      _currentOffset = resolvedOffset;
+      _playbackStartOffset = resolvedOffset;
+      _estimatedPlaybackProgress = 0.0;
     });
 
     if (shouldContinue) {
       await _restartFromCurrentPosition();
     }
-  }
-
-  Future<void> _seekByChars(int delta) async {
-    if (!_isChapterMode) {
-      return;
-    }
-    final nextOffset = (_currentOffset + delta).clamp(
-      0,
-      _safeChapterLength - 1,
-    );
-    await _seekChapterOffset(nextOffset);
   }
 
   Future<void> _applySpeechRate(double value) async {
@@ -219,6 +411,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   void _onPageSliderChangeStart(double value) {
     _pageBeforeDrag = _currentPage;
+    _isDraggingProgress = true;
   }
 
   void _goToPreviousPage() {
@@ -245,6 +438,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   void _onPageSliderChangeEnd(double value) {
     final page = value.round().clamp(0, _maxPageIndex);
+    _isDraggingProgress = false;
     if (_pageBeforeDrag != null && _pageBeforeDrag == page) {
       _pageBeforeDrag = null;
       return;
@@ -255,24 +449,54 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   void _onChapterSliderChangeStart(double value) {
     _offsetBeforeDrag = _currentOffset;
+    _isDraggingProgress = true;
   }
 
   void _onChapterSliderChangeEnd(double value) {
     final nextOffset = value.round().clamp(0, _safeChapterLength - 1);
     final before = _offsetBeforeDrag;
     _offsetBeforeDrag = null;
+    _isDraggingProgress = false;
     if (before != null && before == nextOffset) {
       return;
     }
     _seekChapterOffset(nextOffset, force: true);
   }
 
+  void _updateProgressValue(double value) {
+    setState(() {
+      if (_isChapterMode) {
+        _currentOffset = value.round().clamp(0, _safeChapterLength - 1);
+        _estimatedPlaybackProgress = 0.0;
+      } else {
+        _currentPage = value.round().clamp(0, _maxPageIndex);
+        _estimatedPlaybackProgress = 0.0;
+      }
+    });
+  }
+
+  void _updateProgressFromLocalDx(
+    double localDx,
+    double width,
+    double sliderMin,
+    double sliderMax,
+  ) {
+    if (width <= 0) {
+      return;
+    }
+    final ratio = (localDx / width).clamp(0.0, 1.0);
+    final value = sliderMin + (sliderMax - sliderMin) * ratio;
+    _updateProgressValue(value);
+  }
+
   void _closeWithSync() {
+    final ttsState = ref.read(ttsProvider);
+    _suppressAutoAdvanceOnce = true;
     if (_isChapterMode && widget.chapterIndex != null) {
       Navigator.pop(context, {
         'action': 'goto_txt_location',
         'chapterIndex': widget.chapterIndex,
-        'offset': _currentOffset,
+        'offset': _effectiveChapterOffset(ttsState),
       });
       return;
     }
@@ -293,11 +517,177 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
   }
 
   String _displayTitle() {
-    final chapter = widget.chapterTitle?.trim() ?? '';
+    final chapter = (_activeChapterTitle ?? widget.chapterTitle ?? '').trim();
     if (chapter.isNotEmpty) {
       return chapter;
     }
     return '第 ${_currentPage + 1} 页';
+  }
+
+  void _uiLog(String message) {
+    final timestamp = DateTime.now().toIso8601String();
+    final formatted = '[$timestamp] [AudiobookPage] $message';
+    debugPrint(formatted);
+    developer.log(formatted, name: 'AudiobookPage');
+  }
+
+  void _maybePreloadNextChapter(TtsAppState ttsState) {
+    if (!_isChapterMode || !_hasNextChapter || _nextChapterPreloadTriggered) {
+      return;
+    }
+    final progress = ttsState.playbackProgress > 0
+        ? ttsState.playbackProgress
+        : _estimatedPlaybackProgress;
+    if (progress < 0.82) {
+      return;
+    }
+    _nextChapterPreloadTriggered = true;
+    final nextChapter = _chapterQueue[_chapterQueuePos + 1];
+    _uiLog(
+      'preloading next chapter: '
+      'nextChapterIndex=${nextChapter.index}, progress=$progress',
+    );
+    unawaited(
+      ref.read(ttsProvider.notifier).preloadUpcomingText(nextChapter.text),
+    );
+  }
+
+  void _handleTtsStateTransition(TtsAppState? previous, TtsAppState next) {
+    _uiLog(
+      'tts transition: '
+      'prevSpeaking=${previous?.isSpeaking}, '
+      'prevPaused=${previous?.isPaused}, '
+      'prevProgress=${previous?.playbackProgress}, '
+      'nextSpeaking=${next.isSpeaking}, '
+      'nextPaused=${next.isPaused}, '
+      'nextProgress=${next.playbackProgress}',
+    );
+    if (!_isChapterMode || _activeChapterIndex == null || !mounted) {
+      return;
+    }
+    final isActiveNow = next.isSpeaking || next.isPaused;
+    if (isActiveNow) {
+      final activeOffset = _effectiveChapterOffset(next);
+      if (next.playbackProgress > 0) {
+        _lastActivePlaybackProgress = next.playbackProgress;
+      }
+      if (activeOffset > _lastActiveChapterOffset) {
+        _lastActiveChapterOffset = activeOffset;
+      }
+    }
+    final wasActive =
+        previous?.isSpeaking == true || previous?.isPaused == true;
+    final isStoppedNow = !next.isSpeaking && !next.isPaused;
+    if (!wasActive || !isStoppedNow) {
+      return;
+    }
+    if (_suppressAutoAdvanceOnce) {
+      _suppressAutoAdvanceOnce = false;
+      _uiLog('auto advance suppressed for manual stop');
+      return;
+    }
+    if (_autoAdvanceTriggered) {
+      return;
+    }
+
+    final previousProgress = math.max(
+      previous?.playbackProgress ?? 0.0,
+      _lastActivePlaybackProgress,
+    );
+    final previousOffset = math.max(
+      previous != null ? _effectiveChapterOffset(previous) : 0,
+      _lastActiveChapterOffset,
+    );
+    final reachedEnd =
+        previousProgress >= 0.98 || previousOffset >= _safeChapterLength - 1;
+    _uiLog(
+      'tts stopped: previousProgress=$previousProgress, '
+      'previousOffset=$previousOffset, reachedEnd=$reachedEnd',
+    );
+    if (!reachedEnd) {
+      return;
+    }
+
+    if (_advanceToNextChapterInPlace()) {
+      return;
+    }
+
+    _autoAdvanceTriggered = true;
+    Navigator.pop(context, {
+      'action': 'auto_next_txt_chapter',
+      'chapterIndex': _activeChapterIndex,
+    });
+  }
+
+  void _initializeChapterQueue() {
+    if (widget.chapterQueue.isNotEmpty) {
+      _chapterQueue = List<AudiobookChapterPayload>.from(widget.chapterQueue);
+      _chapterQueuePos = _chapterQueue.indexWhere(
+        (chapter) => chapter.index == widget.chapterIndex,
+      );
+    }
+
+    if (_chapterQueuePos >= 0) {
+      final current = _chapterQueue[_chapterQueuePos];
+      _activeChapterTitle = current.title;
+      _activeChapterText = current.text;
+      _activeChapterIndex = current.index;
+      _activeLookbackStartOffset = widget.lookbackStartOffset;
+      return;
+    }
+
+    _activeChapterTitle = widget.chapterTitle;
+    _activeChapterText = widget.chapterText;
+    _activeChapterIndex = widget.chapterIndex;
+    _activeLookbackStartOffset = widget.lookbackStartOffset;
+  }
+
+  bool _advanceToNextChapterInPlace() {
+    if (!_hasNextChapter) {
+      return false;
+    }
+    _uiLog('advancing in place to next chapter');
+    return _switchToChapterInPlace(_chapterQueuePos + 1);
+  }
+
+  bool _switchToChapterInPlace(int nextQueuePos) {
+    if (nextQueuePos < 0 || nextQueuePos >= _chapterQueue.length) {
+      return false;
+    }
+    final nextChapter = _chapterQueue[nextQueuePos];
+    _uiLog('switching in place to chapter ${nextChapter.index}');
+    _progressTimer?.cancel();
+    setState(() {
+      _chapterQueuePos = nextQueuePos;
+      _activeChapterTitle = nextChapter.title;
+      _activeChapterText = nextChapter.text;
+      _activeChapterIndex = nextChapter.index;
+      _activeLookbackStartOffset = 0;
+      _currentOffset = 0;
+      _playbackStartOffset = 0;
+      _estimatedPlaybackProgress = 0.0;
+      _lastActivePlaybackProgress = 0.0;
+      _lastActiveChapterOffset = 0;
+      _nextChapterPreloadTriggered = false;
+      _suppressAutoAdvanceOnce = false;
+      _autoAdvanceTriggered = false;
+    });
+    unawaited(_startSpeakingFromOffset(0));
+    return true;
+  }
+
+  void _goToPreviousChapter() {
+    if (!_hasPreviousChapter) {
+      return;
+    }
+    _switchToChapterInPlace(_chapterQueuePos - 1);
+  }
+
+  void _goToNextChapter() {
+    if (!_hasNextChapter) {
+      return;
+    }
+    _switchToChapterInPlace(_chapterQueuePos + 1);
   }
 
   int _estimatedDurationSeconds() {
@@ -320,11 +710,57 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  int _effectiveChapterOffset(TtsAppState ttsState) {
+    if (!_isChapterMode) {
+      return _currentOffset;
+    }
+    if (_isDraggingProgress) {
+      return _currentOffset;
+    }
+    final hasLiveProgress =
+        (ttsState.isSpeaking || ttsState.isPaused) &&
+        ttsState.playbackProgress > 0;
+    final progress = hasLiveProgress
+        ? ttsState.playbackProgress
+        : _estimatedPlaybackProgress;
+    if (progress <= 0) {
+      return _playbackStartOffset;
+    }
+    final remainingLength = math.max(
+      1,
+      _safeChapterLength - _playbackStartOffset,
+    );
+    final progressedChars = (remainingLength * progress).round();
+    return (_playbackStartOffset + progressedChars).clamp(
+      0,
+      _safeChapterLength - 1,
+    );
+  }
+
+  double _effectiveSliderValue(TtsAppState ttsState) {
+    if (_isChapterMode) {
+      return _effectiveChapterOffset(ttsState).toDouble();
+    }
+    if (_isDraggingProgress) {
+      return _currentPage.toDouble();
+    }
+    final hasLiveProgress =
+        (ttsState.isSpeaking || ttsState.isPaused) &&
+        ttsState.playbackProgress > 0;
+    if (!hasLiveProgress) {
+      return _currentPage.toDouble();
+    }
+    return (_maxPageIndex * ttsState.playbackProgress).clamp(
+      0,
+      _maxPageIndex.toDouble(),
+    );
+  }
+
   Future<void> _showSpeedControlSheet(double currentRate) async {
     var tempRate = currentRate;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF101722),
+      backgroundColor: _controlBgColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -342,7 +778,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                       width: 42,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.28),
+                        color: Colors.black.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(99),
                       ),
                     ),
@@ -350,7 +786,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     Text(
                       '语速 ${tempRate.toStringAsFixed(2)}x',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.95),
+                        color: _textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
@@ -358,20 +794,17 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     const SizedBox(height: 6),
                     Text(
                       '建议区间 0.9x - 1.3x',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.56),
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: _textTertiary, fontSize: 12),
                     ),
                     const SizedBox(height: 8),
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: _primaryBlue,
-                        inactiveTrackColor: Colors.white.withValues(
-                          alpha: 0.16,
+                        activeTrackColor: _accentGreen,
+                        inactiveTrackColor: _textTertiary.withValues(
+                          alpha: 0.25,
                         ),
-                        thumbColor: Colors.white,
-                        overlayColor: _primaryBlue.withValues(alpha: 0.16),
+                        thumbColor: _accentGreen,
+                        overlayColor: _accentGreen.withValues(alpha: 0.16),
                         trackHeight: 4,
                         thumbShape: const RoundSliderThumbShape(
                           enabledThumbRadius: 8,
@@ -401,32 +834,6 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     );
   }
 
-  String _voiceDisplayLabel(TtsAppState ttsState) {
-    final languageCode = _uiLanguageCode();
-    final selected = ttsState.selectedVoice;
-    final match = ttsState.availableVoices.where(
-      (voice) => voice.value == selected,
-    );
-    if (match.isNotEmpty) {
-      final voice = match.first;
-      final name = voice.localizedName(languageCode);
-      final localizedTraits = voice.localizedTraits(languageCode);
-      final trait = localizedTraits.isNotEmpty ? localizedTraits.first : null;
-      if (trait != null && trait.trim().isNotEmpty) {
-        return '$name · $trait';
-      }
-      return name;
-    }
-    return selected.isNotEmpty ? selected : '选择音色';
-  }
-
-  String _uiLanguageCode() {
-    if (!mounted) {
-      return 'zh';
-    }
-    return Localizations.localeOf(context).languageCode;
-  }
-
   Future<void> _showVoicePickerSheet(TtsAppState ttsState) async {
     final locale = ref
         .read(ttsProvider.notifier)
@@ -439,7 +846,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF101722),
+      backgroundColor: _controlBgColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -458,7 +865,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.28),
+                    color: Colors.black.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -468,7 +875,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     Text(
                       '选择音色',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.95),
+                        color: _textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                       ),
@@ -480,10 +887,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                           : () => ref
                                 .read(ttsProvider.notifier)
                                 .loadVoices(locale: locale),
-                      icon: Icon(
-                        Icons.refresh,
-                        color: Colors.white.withValues(alpha: 0.8),
-                      ),
+                      icon: Icon(Icons.refresh, color: _accentGreen),
                     ),
                   ],
                 ),
@@ -500,9 +904,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           child: Text(
                             '未获取到音色列表，请检查 TTS 服务连接。',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                            ),
+                            style: TextStyle(color: _textSecondary),
                           ),
                         )
                       : GridView.builder(
@@ -523,8 +925,8 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
                             return Material(
                               color: selected
-                                  ? _primaryBlue.withValues(alpha: 0.18)
-                                  : Colors.white.withValues(alpha: 0.05),
+                                  ? _accentGreen.withValues(alpha: 0.18)
+                                  : Colors.black.withValues(alpha: 0.04),
                               borderRadius: BorderRadius.circular(14),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(14),
@@ -565,9 +967,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.95,
-                                                ),
+                                                color: _textPrimary,
                                                 fontSize: 14,
                                                 fontWeight: selected
                                                     ? FontWeight.w700
@@ -578,7 +978,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                           if (selected)
                                             const Icon(
                                               Icons.check_circle,
-                                              color: _primaryBlue,
+                                              color: _accentGreen,
                                               size: 18,
                                             ),
                                         ],
@@ -595,9 +995,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                         maxLines: 3,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.66,
-                                          ),
+                                          color: _textSecondary,
                                           fontSize: 12,
                                           height: 1.3,
                                         ),
@@ -620,14 +1018,14 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   bool _isAtStart() {
     if (_isChapterMode) {
-      return _currentOffset <= 0;
+      return !_hasPreviousChapter;
     }
     return _currentPage <= 0;
   }
 
   bool _isAtEnd() {
     if (_isChapterMode) {
-      return _currentOffset >= _safeChapterLength - 1;
+      return !_hasNextChapter;
     }
     return _currentPage >= _maxPageIndex;
   }
@@ -646,100 +1044,69 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
               (widget.initialText?.trim().isNotEmpty == true);
     _syncDiscAnimation(ttsState);
 
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [_bgTop, _bgBottom],
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_bgStart, _bgEnd],
+          ),
         ),
-      ),
-      child: Stack(
-        children: [
-          _buildAmbientGlow(),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              14,
-              topInset + 20,
-              14,
-              bottomInset + 12,
+        child: Stack(
+          children: [
+            Positioned(top: topInset + 84, left: -36, child: _ambientGlow(140)),
+            Positioned(
+              top: topInset + 120,
+              right: -28,
+              child: _ambientGlow(120),
             ),
-            child: Column(
-              children: [
-                _buildTopBar(),
-                const SizedBox(height: 18),
-                _buildBookCover(),
-                const SizedBox(height: 14),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white.withValues(alpha: 0.96),
-                    height: 1.1,
-                  ),
+            SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  topInset + 6,
+                  20,
+                  bottomInset + 16,
                 ),
-                const SizedBox(height: 8),
-                const Spacer(),
-                _buildMetaRow(rate, ttsState),
-                const SizedBox(height: 12),
-                _buildProgressSection(),
-                const SizedBox(height: 12),
-                _buildBottomControls(ttsState, canPlay),
-                if (!canPlay) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '当前页没有可播放文本',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.58),
-                      fontSize: 12,
+                child: Column(
+                  children: [
+                    _buildTopBar(),
+                    const SizedBox(height: 24),
+                    _buildBookCover(),
+                    const SizedBox(height: 36),
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        color: _textPrimary,
+                        height: 1.2,
+                      ),
                     ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAmbientGlow() {
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          Positioned(
-            top: -80,
-            right: -70,
-            child: Container(
-              width: 220,
-              height: 220,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Color(0x5C3B82F6), Color(0x003B82F6)],
+                    const Spacer(),
+                    _buildMetaRow(rate, ttsState),
+                    const SizedBox(height: 28),
+                    _buildProgressSection(ttsState),
+                    const SizedBox(height: 30),
+                    _buildBottomControls(ttsState, canPlay),
+                    if (!canPlay) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        '当前页没有可播放文本',
+                        style: TextStyle(color: _textTertiary, fontSize: 12),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
-          ),
-          Positioned(
-            left: -80,
-            bottom: 60,
-            child: Container(
-              width: 190,
-              height: 190,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Color(0x4038BDF8), Color(0x0038BDF8)],
-                ),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -760,7 +1127,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         ),
         const SizedBox(width: 4),
         _topIconButton(
-          icon: Icons.more_vert,
+          icon: Icons.more_vert_rounded,
           tooltip: '更多',
           onTap: () => _showToast('更多功能即将支持'),
         ),
@@ -774,22 +1141,20 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     required VoidCallback onTap,
   }) {
     return SizedBox(
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       child: Tooltip(
         message: tooltip,
         child: Material(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(18),
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
           child: InkWell(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(12),
             onTap: onTap,
-            focusColor: Colors.white.withValues(alpha: 0.14),
-            child: Icon(
-              icon,
-              size: 22,
-              color: Colors.white.withValues(alpha: 0.9),
-            ),
+            focusColor: _accentGreenSoft,
+            splashColor: _accentGreenSoft,
+            highlightColor: Colors.transparent,
+            child: Icon(icon, size: 26, color: _textPrimary),
           ),
         ),
       ),
@@ -797,8 +1162,8 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
   }
 
   Widget _buildBookCover() {
-    final discSize = (MediaQuery.of(context).size.width * 0.58).clamp(
-      220.0,
+    final discSize = (MediaQuery.of(context).size.width * 0.618).clamp(
+      176.0,
       300.0,
     );
     final coverPath = widget.book.coverPath;
@@ -807,68 +1172,62 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         : null;
     final hasCover = coverFile != null && coverFile.existsSync();
 
-    return Container(
+    return SizedBox(
       width: discSize.toDouble(),
       height: discSize.toDouble(),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.42),
-            blurRadius: 32,
-            offset: const Offset(0, 18),
-          ),
-        ],
-      ),
       child: Stack(
         alignment: Alignment.center,
         children: [
           Container(
+            width: discSize * 1.08,
+            height: discSize * 1.08,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+              gradient: RadialGradient(
                 colors: [
-                  const Color(0xFF273040),
-                  const Color(0xFF0E1118),
-                  const Color(0xFF242B37),
+                  _accentGreenSoft.withValues(alpha: 0.28),
+                  _accentGreenSoft.withValues(alpha: 0.06),
+                  Colors.transparent,
                 ],
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: Container(
-              margin: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  width: 1,
-                ),
               ),
             ),
           ),
           RotationTransition(
             turns: _discController,
             child: Container(
-              width: discSize * 0.84,
-              height: discSize * 0.84,
+              width: discSize,
+              height: discSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFFA7F3D0), Color(0xFF6EE7B7)],
+                ),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.14),
+                  color: Colors.white.withValues(alpha: 0.35),
                   width: 2,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
-              child: ClipOval(
-                child: hasCover
-                    ? Image.file(
-                        coverFile,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
-                      )
-                    : _buildCoverPlaceholder(),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: ClipOval(
+                  child: hasCover
+                      ? Image.file(
+                          coverFile,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              _buildCoverPlaceholder(),
+                        )
+                      : _buildCoverPlaceholder(),
+                ),
               ),
             ),
           ),
@@ -879,36 +1238,28 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   Widget _buildCoverPlaceholder() {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF273B62), Color(0xFF111C2F)],
-        ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        shape: BoxShape.circle,
       ),
       child: Center(
-        child: Icon(
-          Icons.menu_book_rounded,
-          size: 54,
-          color: Colors.white.withValues(alpha: 0.76),
-        ),
+        child: Icon(Icons.menu_book_rounded, size: 60, color: _accentGreen),
       ),
     );
   }
 
   Widget _buildMetaRow(double rate, TtsAppState ttsState) {
-    final voiceLabel = _voiceDisplayLabel(ttsState);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         _metaAction(
           icon: Icons.timer_outlined,
-          label: '定时关闭',
+          label: '定时',
           onTap: () => _showToast('定时关闭即将支持'),
         ),
         _metaAction(
           icon: Icons.record_voice_over_outlined,
-          label: voiceLabel,
+          label: '音色',
           onTap: () => _showVoicePickerSheet(ttsState),
         ),
         _metaAction(
@@ -917,9 +1268,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
           onTap: () => _showSpeedControlSheet(rate),
         ),
         _metaAction(
-          icon: Icons.playlist_add_check_rounded,
-          label: '已加入',
-          onTap: () => _showToast('已加入播放列表'),
+          icon: Icons.format_list_bulleted_rounded,
+          label: '章节',
+          onTap: () => _showToast('章节列表即将支持'),
         ),
       ],
     );
@@ -932,22 +1283,20 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
   }) {
     return Expanded(
       child: SizedBox(
-        height: 54,
+        height: 64,
         child: Material(
-          color: Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(10),
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
           child: InkWell(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(18),
             onTap: onTap,
-            focusColor: _primaryBlueSoft,
+            focusColor: _accentGreenSoft,
+            splashColor: _accentGreenSoft,
+            highlightColor: Colors.transparent,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  icon,
-                  size: 21,
-                  color: Colors.white.withValues(alpha: 0.82),
-                ),
+                Icon(icon, size: 25, color: _textSecondary),
                 const SizedBox(height: 4),
                 Text(
                   label,
@@ -955,7 +1304,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.white.withValues(alpha: 0.72),
+                    color: _textSecondary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -967,122 +1316,192 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     );
   }
 
-  Widget _buildProgressSection() {
+  Widget _buildProgressSection(TtsAppState ttsState) {
     final sliderMin = 0.0;
     final sliderMax = _isChapterMode
         ? (_safeChapterLength - 1).toDouble()
         : _maxPageIndex.toDouble();
-    final sliderValue = _isChapterMode
-        ? _currentOffset.toDouble()
-        : _currentPage.toDouble();
+    final sliderValue = _effectiveSliderValue(ttsState);
     final totalSeconds = _estimatedDurationSeconds();
     final ratio = sliderMax <= 0
         ? 0.0
         : (sliderValue / sliderMax).clamp(0.0, 1.0);
     final currentSeconds = (totalSeconds * ratio).round();
+    final timeLabel =
+        '${_formatDuration(currentSeconds)} / ${_formatDuration(totalSeconds)}';
 
     return Row(
       children: [
-        _stepButton(
-          icon: Icons.replay_10_rounded,
-          onTap: _isChapterMode ? () => _seekByChars(-480) : _goToPreviousPage,
+        _transportButton(
+          icon: Icons.keyboard_double_arrow_left_rounded,
+          tooltip: _isChapterMode ? '上一章' : '上一页',
+          onTap: _isChapterMode ? _goToPreviousChapter : _goToPreviousPage,
           enabled: !_isAtStart(),
+          size: 22,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    _isChapterMode
-                        ? '章节进度 ${(ratio * 100).toStringAsFixed(0)}%'
-                        : '页码 ${_currentPage + 1}/$_safeTotalPages',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withValues(alpha: 0.82),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${_formatDuration(currentSeconds)} / ${_formatDuration(totalSeconds)}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.white.withValues(alpha: 0.7),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: _primaryBlue,
-                  inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
-                  thumbColor: Colors.white,
-                  overlayColor: _primaryBlue.withValues(alpha: 0.14),
-                  trackHeight: 4,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 7,
-                  ),
-                ),
-                child: Slider(
-                  value: sliderValue.clamp(sliderMin, sliderMax),
-                  min: sliderMin,
-                  max: sliderMax,
-                  onChangeStart: _isChapterMode
-                      ? _onChapterSliderChangeStart
-                      : _onPageSliderChangeStart,
-                  onChanged: (value) {
-                    setState(() {
-                      if (_isChapterMode) {
-                        _currentOffset = value.round().clamp(
-                          0,
-                          _safeChapterLength - 1,
-                        );
-                      } else {
-                        _currentPage = value.round().clamp(0, _maxPageIndex);
-                      }
-                    });
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final trackWidth = constraints.maxWidth;
+              final bubbleWidth = 72.0;
+              final effectiveTrackWidth = math.max(
+                0.0,
+                trackWidth - bubbleWidth,
+              );
+              final bubbleLeft = (effectiveTrackWidth * ratio)
+                  .clamp(0.0, effectiveTrackWidth)
+                  .toDouble();
+              final progressWidth = bubbleLeft + bubbleWidth;
+
+              return SizedBox(
+                height: 32,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) {
+                    if (_isChapterMode) {
+                      _onChapterSliderChangeStart(sliderValue);
+                    } else {
+                      _onPageSliderChangeStart(sliderValue);
+                    }
+                    _updateProgressFromLocalDx(
+                      details.localPosition.dx,
+                      trackWidth,
+                      sliderMin,
+                      sliderMax,
+                    );
                   },
-                  onChangeEnd: _isChapterMode
-                      ? _onChapterSliderChangeEnd
-                      : _onPageSliderChangeEnd,
+                  onTapUp: (_) {
+                    if (_isChapterMode) {
+                      _onChapterSliderChangeEnd(_currentOffset.toDouble());
+                    } else {
+                      _onPageSliderChangeEnd(_currentPage.toDouble());
+                    }
+                  },
+                  onHorizontalDragStart: (_) {
+                    if (_isChapterMode) {
+                      _onChapterSliderChangeStart(sliderValue);
+                    } else {
+                      _onPageSliderChangeStart(sliderValue);
+                    }
+                  },
+                  onHorizontalDragUpdate: (details) {
+                    _updateProgressFromLocalDx(
+                      details.localPosition.dx,
+                      trackWidth,
+                      sliderMin,
+                      sliderMax,
+                    );
+                  },
+                  onHorizontalDragEnd: (_) {
+                    if (_isChapterMode) {
+                      _onChapterSliderChangeEnd(_currentOffset.toDouble());
+                    } else {
+                      _onPageSliderChangeEnd(_currentPage.toDouble());
+                    }
+                  },
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 12,
+                        child: Container(
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        top: 12,
+                        child: Container(
+                          height: 4,
+                          width: progressWidth.clamp(0.0, trackWidth),
+                          decoration: BoxDecoration(
+                            color: _accentGreen,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: bubbleLeft,
+                        top: 4,
+                        child: _progressThumbBubble(timeLabel),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              );
+            },
           ),
         ),
-        const SizedBox(width: 8),
-        _stepButton(
-          icon: Icons.forward_10_rounded,
-          onTap: _isChapterMode ? () => _seekByChars(480) : _goToNextPage,
+        const SizedBox(width: 12),
+        _transportButton(
+          icon: Icons.keyboard_double_arrow_right_rounded,
+          tooltip: _isChapterMode ? '下一章' : '下一页',
+          onTap: _isChapterMode ? _goToNextChapter : _goToNextPage,
           enabled: !_isAtEnd(),
+          size: 22,
         ),
       ],
     );
   }
 
-  Widget _stepButton({
+  Widget _progressThumbBubble(String label) {
+    return Container(
+      width: 72,
+      height: 20,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _accentGreen.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.clip,
+        style: const TextStyle(
+          fontSize: 9,
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+          height: 1,
+        ),
+      ),
+    );
+  }
+
+  Widget _transportButton({
     required IconData icon,
+    required String tooltip,
     required VoidCallback onTap,
     required bool enabled,
+    required double size,
   }) {
-    return SizedBox(
-      width: 42,
-      height: 42,
-      child: Material(
-        color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.02),
-        borderRadius: BorderRadius.circular(21),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(21),
-          onTap: enabled ? onTap : null,
-          focusColor: _primaryBlueSoft,
-          child: Icon(
-            icon,
-            size: 24,
-            color: Colors.white.withValues(alpha: enabled ? 0.82 : 0.3),
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: enabled ? onTap : null,
+            splashColor: _accentGreenSoft,
+            highlightColor: Colors.transparent,
+            focusColor: _accentGreenSoft,
+            child: Icon(
+              icon,
+              size: size,
+              color: enabled
+                  ? _textSecondary
+                  : _textTertiary.withValues(alpha: 0.5),
+            ),
           ),
         ),
       ),
@@ -1093,21 +1512,19 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
     final isLoadingAudio =
         ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
+    final canTapPlayback = canPlay && (!isLoadingAudio || ttsState.isPaused);
 
     return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _bottomAction(
-          icon: Icons.import_contacts_outlined,
-          label: '原文',
-          onTap: _closeWithSync,
-        ),
-        const SizedBox(width: 8),
-        _centerPlayerButton(
-          icon: Icons.fast_rewind_rounded,
-          onTap: _isChapterMode ? () => _seekByChars(-480) : _goToPreviousPage,
+        _transportButton(
+          icon: Icons.skip_previous_rounded,
+          tooltip: _isChapterMode ? '上一章' : '上一页',
+          onTap: _isChapterMode ? _goToPreviousChapter : _goToPreviousPage,
           enabled: !_isAtStart(),
+          size: 34,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 30),
         SizedBox(
           width: 88,
           height: 88,
@@ -1115,109 +1532,73 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
             alignment: Alignment.center,
             children: [
               Material(
-                color: canPlay
-                    ? _primaryBlue
-                    : _primaryBlue.withValues(alpha: 0.42),
+                color: Colors.transparent,
                 shape: const CircleBorder(),
                 child: InkWell(
                   customBorder: const CircleBorder(),
-                  onTap: canPlay && !isLoadingAudio
-                      ? () => _togglePlayback(ttsState)
-                      : null,
+                  splashColor: _accentGreenSoft,
+                  highlightColor: Colors.transparent,
+                  onTap: () {
+                    _uiLog(
+                      'playback button tapped: canPlay=$canPlay, '
+                      'isLoadingAudio=$isLoadingAudio, '
+                      'isPaused=${ttsState.isPaused}, '
+                      'isSpeaking=${ttsState.isSpeaking}, '
+                      'canTapPlayback=$canTapPlayback',
+                    );
+                    if (!canTapPlayback) {
+                      _uiLog('playback button blocked');
+                      return;
+                    }
+                    unawaited(_togglePlayback(ttsState));
+                  },
                   child: Icon(
                     isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    size: 44,
-                    color: Colors.white,
+                    size: 42,
+                    color: _textPrimary,
                   ),
                 ),
               ),
               if (isLoadingAudio)
                 Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Colors.white.withValues(alpha: 0.92),
+                  child: IgnorePointer(
+                    child: Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(_accentGreen),
+                        backgroundColor: _accentGreen.withValues(alpha: 0.15),
                       ),
-                      backgroundColor: Colors.white.withValues(alpha: 0.18),
                     ),
                   ),
                 ),
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        _centerPlayerButton(
-          icon: Icons.fast_forward_rounded,
-          onTap: _isChapterMode ? () => _seekByChars(480) : _goToNextPage,
+        const SizedBox(width: 30),
+        _transportButton(
+          icon: Icons.skip_next_rounded,
+          tooltip: _isChapterMode ? '下一章' : '下一页',
+          onTap: _isChapterMode ? _goToNextChapter : _goToNextPage,
           enabled: !_isAtEnd(),
-        ),
-        const SizedBox(width: 8),
-        _bottomAction(
-          icon: Icons.menu_rounded,
-          label: '目录',
-          onTap: () => _showToast('目录即将支持'),
+          size: 34,
         ),
       ],
     );
   }
 
-  Widget _centerPlayerButton({
-    required IconData icon,
-    required VoidCallback onTap,
-    required bool enabled,
-  }) {
-    return Expanded(
-      child: SizedBox(
-        height: 52,
-        child: Material(
-          color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.02),
-          borderRadius: BorderRadius.circular(26),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(26),
-            onTap: enabled ? onTap : null,
-            focusColor: _primaryBlueSoft,
-            child: Icon(
-              icon,
-              size: 34,
-              color: Colors.white.withValues(alpha: enabled ? 0.88 : 0.32),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _bottomAction({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return SizedBox(
-      width: 56,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          focusColor: _primaryBlueSoft,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 22, color: Colors.white.withValues(alpha: 0.86)),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.white.withValues(alpha: 0.76),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+  Widget _ambientGlow(double size) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [
+              _accentGreenSoft.withValues(alpha: 0.18),
+              _accentGreenSoft.withValues(alpha: 0.04),
+              Colors.transparent,
             ],
           ),
         ),
