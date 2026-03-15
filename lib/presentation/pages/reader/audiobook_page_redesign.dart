@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
 
 /// 听书界面改进设计方案
@@ -53,11 +54,11 @@ class AudiobookPageRedesign extends ConsumerStatefulWidget {
 
 class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     with SingleTickerProviderStateMixin {
-  static const Color _bgTop = Color(0xFF0A101B);
-  static const Color _bgBottom = Color(0xFF05070A);
-  static const Color _primaryBlue = Color(0xFF3B82F6);
-  static const Color _primaryBlueSoft = Color(0x663B82F6);
-  static const Color _accentGlow = Color(0xFF38BDF8);
+  late final Color _bgTop;
+  late final Color _bgBottom;
+  late final Color _primaryBlue;
+  late final Color _primaryBlueSoft;
+  late final Color _accentGlow;
 
   Timer? _progressTimer;
   late final AnimationController _discController;
@@ -77,9 +78,20 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
   int get _safeTotalPages => widget.totalPages <= 0 ? 1 : widget.totalPages;
   int get _maxPageIndex => _safeTotalPages - 1;
 
+  void _initColors() {
+    final theme = ref.read(currentThemeProvider);
+    // 听书页面背景：使用薄荷奶白（替代之前的深蓝色）
+    _bgTop = theme.audiobookBgTop;
+    _bgBottom = Color(0xFFF1F4EE); // 薄荷奶白 - 听书页专用背景
+    _primaryBlue = theme.primaryColor; // 使用主题主色（鼠尾草绿）
+    _primaryBlueSoft = theme.primaryColor.withOpacity(0.1); // 降低透明度，更清新
+    _accentGlow = theme.accentColor;
+  }
+
   @override
   void initState() {
     super.initState();
+    _initColors();
     _discController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
@@ -150,7 +162,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
@@ -180,17 +192,20 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                     _buildBookCover(),
                     const SizedBox(height: 24),
 
-                    // 书名/章节标题
+                    // 书名/章节标题 - 优化：缩小字号，增加字间距，使用深灰绿
                     Text(
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.3,
+                      style: TextStyle(
+                        fontSize: 20, // 从24缩小到20
+                        fontWeight: FontWeight.w600, // 从w700改为w600，更文艺
+                        color: ref
+                            .read(currentThemeProvider)
+                            .textColor, // 深灰绿 #2D352B
+                        height: 1.4,
+                        letterSpacing: 0.5, // 增加字间距
                       ),
                     ),
 
@@ -276,6 +291,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   /// 唱片封面（带旋转动画）
   Widget _buildBookCover() {
+    final theme = ref.read(currentThemeProvider);
     final discSize = MediaQuery.of(context).size.width * 0.52;
     final discSizeClamped = discSize.clamp(200.0, 280.0);
     final coverPath = widget.book.coverPath;
@@ -290,6 +306,21 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
       child: Stack(
         alignment: Alignment.center,
         children: [
+          // 外圈白色外发光 - 增加空气感
+          Container(
+            width: discSizeClamped + 8,
+            height: discSizeClamped + 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  blurRadius: 16,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+          ),
           // 外圈光晕
           Container(
             width: discSizeClamped,
@@ -312,9 +343,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
+                  color: Colors.black.withValues(alpha: 0.05), // 减弱阴影，更清新
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -375,7 +406,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     }
 
     if (ttsState.isLoadingAudio) {
-      return const Row(
+      return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
@@ -416,13 +447,13 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             Container(
               width: 6,
               height: 6,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: _accentGlow,
                 shape: BoxShape.circle,
               ),
             ),
             const SizedBox(width: 8),
-            const Text(
+            Text(
               '播放中',
               style: TextStyle(
                 color: _accentGlow,
@@ -449,9 +480,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             Text(
               '已暂停',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: ref.read(currentThemeProvider).secondaryTextColor, // 深灰绿
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
+                letterSpacing: 0.3, // 增加字间距
               ),
             ),
           ],
@@ -491,12 +523,13 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     );
   }
 
-  /// 次要功能按钮
+  /// 次要功能按钮 - 优化：加粗图标线条，使用深灰绿提高对比度
   Widget _secondaryActionButton({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
+    final theme = ref.read(currentThemeProvider);
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -507,22 +540,24 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
+                color: theme.progressTrackColor, // 极淡灰色背景
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
                 icon,
-                size: 22,
-                color: Colors.white.withValues(alpha: 0.8),
+                size: 24, // 从22增大到24，加粗线条
+                color: theme.textColor, // 深灰绿，提高识别度
+                weight: 24, // 图标线条加粗
               ),
             ),
             const SizedBox(height: 6),
             Text(
               label,
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.6),
+                color: theme.secondaryTextColor, // 深灰绿
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
+                letterSpacing: 0.2, // 增加字间距
               ),
             ),
           ],
@@ -576,15 +611,25 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           ),
         ),
         const SizedBox(height: 12),
-        // 进度条
+        // 进度条 - 优化：灰色底+绿色进度+更大拖拽点
         SliderTheme(
           data: SliderTheme.of(context).copyWith(
-            activeTrackColor: _accentGlow,
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.12),
-            thumbColor: Colors.white,
-            overlayColor: _accentGlow.withValues(alpha: 0.12),
+            activeTrackColor: ref
+                .read(currentThemeProvider)
+                .primaryColor, // 主色调绿色
+            inactiveTrackColor: ref
+                .read(currentThemeProvider)
+                .progressTrackColor, // 极淡灰色底
+            thumbColor: ref.read(currentThemeProvider).primaryColor, // 绿色拖拽点
+            overlayColor: ref
+                .read(currentThemeProvider)
+                .primaryColor
+                .withValues(alpha: 0.1),
             trackHeight: 4,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+            thumbShape: const RoundSliderThumbShape(
+              enabledThumbRadius: 10,
+            ), // 从8增大到10，方便拖拽
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
           ),
           child: Slider(
             value: sliderValue.clamp(sliderMin, sliderMax),
@@ -645,13 +690,14 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     );
   }
 
-  /// 主控按钮（快退/快进）
+  /// 主控按钮（快退/快进）- 优化：加粗图标线条，使用深灰绿
   Widget _primaryControlButton({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
     required bool enabled,
   }) {
+    final theme = ref.read(currentThemeProvider);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -659,7 +705,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           width: 64,
           height: 64,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.03),
+            color: enabled
+                ? theme.progressTrackColor
+                : theme.progressTrackColor.withValues(alpha: 0.5), // 极淡灰色背景
             borderRadius: BorderRadius.circular(20),
           ),
           child: Material(
@@ -671,7 +719,11 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
               child: Icon(
                 icon,
                 size: 28,
-                color: Colors.white.withValues(alpha: enabled ? 0.9 : 0.3),
+                color: enabled
+                    ? theme
+                          .textColor // 深灰绿
+                    : theme.secondaryTextColor.withValues(alpha: 0.3),
+                weight: 24, // 图标线条加粗
               ),
             ),
           ),
@@ -680,22 +732,26 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         Text(
           label,
           style: TextStyle(
-            color: Colors.white.withValues(alpha: enabled ? 0.5 : 0.2),
+            color: enabled
+                ? theme.secondaryTextColor
+                : theme.secondaryTextColor.withValues(alpha: 0.3), // 深灰绿
             fontSize: 11,
             fontWeight: FontWeight.w500,
+            letterSpacing: 0.2, // 增加字间距
           ),
         ),
       ],
     );
   }
 
-  /// 播放/暂停按钮（中心大号圆形按钮）
+  /// 播放/暂停按钮（中心大号圆形按钮）- 优化：深绿色圆形底衬
   Widget _buildPlayPauseButton(
     bool canPlay,
     bool isPlaying,
     bool isLoadingAudio,
     TtsAppState ttsState,
   ) {
+    final theme = ref.read(currentThemeProvider);
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -708,11 +764,11 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             gradient: RadialGradient(
               colors: [
                 canPlay
-                    ? _primaryBlue.withValues(alpha: 0.4)
-                    : _primaryBlue.withValues(alpha: 0.15),
+                    ? theme.primaryDarkColor.withValues(alpha: 0.15) // 深绿色底衬
+                    : theme.primaryDarkColor.withValues(alpha: 0.05),
                 canPlay
-                    ? _primaryBlue.withValues(alpha: 0.0)
-                    : _primaryBlue.withValues(alpha: 0.0),
+                    ? theme.primaryDarkColor.withValues(alpha: 0.0)
+                    : theme.primaryDarkColor.withValues(alpha: 0.0),
               ],
             ),
           ),
@@ -727,22 +783,20 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             height: 88,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: canPlay
-                    ? [const Color(0xFF4A9EFF), _primaryBlue]
-                    : [
-                        _primaryBlue.withValues(alpha: 0.3),
-                        _primaryBlue.withValues(alpha: 0.2),
-                      ],
-              ),
+              color: canPlay
+                  ? theme.primaryDarkColor
+                  : theme.primaryColor.withValues(alpha: 0.4), // 深绿色圆形底衬
               boxShadow: canPlay
                   ? [
                       BoxShadow(
-                        color: _primaryBlue.withValues(alpha: 0.4),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
+                        color: theme.primaryDarkColor.withValues(alpha: 0.3),
+                        blurRadius: 24,
+                        offset: const Offset(0, 12),
+                      ),
+                      BoxShadow(
+                        color: theme.primaryColor.withValues(alpha: 0.15),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
                       ),
                     ]
                   : [],

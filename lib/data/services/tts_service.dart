@@ -115,6 +115,7 @@ class TtsService {
   final Stopwatch _playbackStopwatch = Stopwatch();
   void Function(TtsState state)? _stateCallback;
   void Function(double progress)? _progressCallback;
+  void Function(int? start, int? end)? _segmentCallback;
 
   TtsState _state = TtsState.stopped;
   _TtsEngine _activeEngine = _TtsEngine.none;
@@ -157,6 +158,7 @@ class TtsService {
         'processingState=${_player.processingState}, '
         'playing=${_player.playing}',
       );
+      _reportCloudSegmentForCurrentIndex(index);
     });
     _player.playbackEventStream.listen(
       (_) {},
@@ -177,12 +179,43 @@ class TtsService {
     try {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.speech());
-      await session.setActive(true);
       _log('audio session configured for speech playback.');
     } catch (e, st) {
       _log('audio session configure failed: $e');
       developer.log(
         'TtsService audio session configure error',
+        name: 'TtsService',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  Future<void> _activateAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+      _log('audio session activated.');
+    } catch (e, st) {
+      _log('audio session activation failed: $e');
+      developer.log(
+        'TtsService audio session activation error',
+        name: 'TtsService',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  Future<void> _deactivateAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+      _log('audio session deactivated.');
+    } catch (e, st) {
+      _log('audio session deactivation failed: $e');
+      developer.log(
+        'TtsService audio session deactivation error',
         name: 'TtsService',
         error: e,
         stackTrace: st,
@@ -206,6 +239,7 @@ class TtsService {
     final generation = ++_playbackGeneration;
     _currentText = trimmedText;
     await _stopActive(notifyStopped: false);
+    await _activateAudioSession();
     _progressCallback?.call(0.0);
 
     final shouldTryCloud = _shouldTryCloud;
@@ -254,9 +288,9 @@ class TtsService {
       _log('local: playback started.');
     } catch (e) {
       _currentText = null;
-      _activeEngine = _TtsEngine.none;
       _stopProgressTracking(resetProgress: true);
       _setState(TtsState.stopped);
+      unawaited(_stopActive(notifyStopped: false));
       _log('local: failed. error=$e');
       rethrow;
     }
@@ -364,7 +398,9 @@ class TtsService {
             break;
           }
           if (_currentText == null || _currentText!.trim().isEmpty) {
-            _log('resume aborted: no active engine, no playlist, no currentText.');
+            _log(
+              'resume aborted: no active engine, no playlist, no currentText.',
+            );
             return;
           }
           await speak(_currentText!);
@@ -439,10 +475,7 @@ class TtsService {
           );
           continue;
         }
-        final file = await _writeCloudPrefetchFile(
-          bytes,
-          chunkIndex: i,
-        );
+        final file = await _writeCloudPrefetchFile(bytes, chunkIndex: i);
         _cloudPrefetchCache[cacheKey] = file.path;
         _log(
           'cloud preload ready: chunk=${i + 1}/${chunks.length}, '
@@ -529,12 +562,17 @@ class TtsService {
     _progressCallback = callback;
   }
 
+  void setSegmentCallback(void Function(int? start, int? end) callback) {
+    _segmentCallback = callback;
+  }
+
   Future<void> dispose() async {
     _fallbackProgressTimer?.cancel();
     await _playerStateSubscription?.cancel();
     await _playerPositionSubscription?.cancel();
     await _playerIndexSubscription?.cancel();
     await _player.dispose();
+    await _deactivateAudioSession();
     await _cleanupCloudTempFiles();
     await _cleanupCloudPrefetchTempFiles();
   }
@@ -553,20 +591,33 @@ class TtsService {
     );
 
     if (playerState.processingState == ProcessingState.completed) {
+      final currentIndex = _player.currentIndex ?? 0;
+      final hasFetchedAllChunks = _cloudQueuedCount >= _cloudChunks.length;
+
       _log(
-        'cloud: completed reached, dispatching stopped. '
-        'index=${_player.currentIndex}, '
+        'cloud: completed reached, '
+        'index=$currentIndex, '
         'positionMs=${_player.position.inMilliseconds}, '
         'durationMs=${_player.duration?.inMilliseconds ?? -1}, '
         'queuedCount=$_cloudQueuedCount, '
-        'chunkCount=${_cloudChunkLengths.length}',
+        'chunkCount=${_cloudChunkLengths.length}, '
+        'hasFetchedAllChunks=$hasFetchedAllChunks',
       );
-      _setState(TtsState.stopped);
-      _resetCloudQueueState();
-      unawaited(_cleanupCloudTempFiles());
-      _currentText = null;
-      _activeEngine = _TtsEngine.none;
-      _stopProgressTracking(resetProgress: true);
+
+      // Only stop if we've fetched and played all chunks
+      if (hasFetchedAllChunks) {
+        _log('cloud: all chunks played, dispatching stopped.');
+        _setState(TtsState.stopped);
+        _resetCloudQueueState();
+        unawaited(_cleanupCloudTempFiles());
+        _currentText = null;
+        _stopProgressTracking(resetProgress: true);
+        unawaited(_stopActive(notifyStopped: false));
+        return;
+      }
+
+      // More chunks available - continue fetching and playing
+      _log('cloud: more chunks available, continuing playback...');
       return;
     }
 
@@ -582,8 +633,8 @@ class TtsService {
 
     if (playerState.processingState == ProcessingState.idle &&
         _currentText == null) {
-      _activeEngine = _TtsEngine.none;
       _setState(TtsState.stopped);
+      unawaited(_stopActive(notifyStopped: false));
     }
   }
 
@@ -619,11 +670,12 @@ class TtsService {
         break;
       case 'stopped':
         _resetCloudQueueState();
+        _segmentCallback?.call(null, null);
         unawaited(_cleanupCloudTempFiles());
         _currentText = null;
-        _activeEngine = _TtsEngine.none;
         _stopProgressTracking(resetProgress: true);
         _setState(TtsState.stopped);
+        unawaited(_stopActive(notifyStopped: false));
         break;
     }
   }
@@ -804,16 +856,14 @@ class TtsService {
     _cloudQueuedCount = 1;
     _activeEngine = _TtsEngine.cloud;
     _progressCallback?.call(0.0);
+    _reportCloudSegmentForCurrentIndex(0);
     await _primeCloudQueueBeforePlayback(
       headers: headers,
       generation: generation,
     );
 
     if (chunks.length > 1) {
-      unawaited(_maintainCloudBuffer(
-        headers: headers,
-        generation: generation,
-      ));
+      unawaited(_maintainCloudBuffer(headers: headers, generation: generation));
     }
     requestStopwatch.stop();
     _log(
@@ -887,7 +937,9 @@ class TtsService {
         if (!_isPlaybackGenerationActive(generation)) {
           return;
         }
-        _log('cloud prime failed: chunk=${chunkIndex + 1}/$totalChunks, error=$e');
+        _log(
+          'cloud prime failed: chunk=${chunkIndex + 1}/$totalChunks, error=$e',
+        );
         developer.log(
           'TtsService cloud prime failure',
           name: 'TtsService',
@@ -1101,6 +1153,7 @@ class TtsService {
     _log('local: force stopping cloud player before native speak...');
     await _player.stop();
     _resetCloudQueueState();
+    _segmentCallback?.call(null, null);
     await _cleanupCloudTempFiles();
     await _channel.invokeMethod('speak', {
       'text': text,
@@ -1148,9 +1201,26 @@ class TtsService {
     if (notifyStopped) {
       _setState(TtsState.stopped);
     }
+    _segmentCallback?.call(null, null);
+    await _deactivateAudioSession();
     if (stopError != null) {
       throw stopError;
     }
+  }
+
+  void _reportCloudSegmentForCurrentIndex(int? index) {
+    if (_activeEngine != _TtsEngine.cloud || _cloudChunkLengths.isEmpty) {
+      _segmentCallback?.call(null, null);
+      return;
+    }
+
+    final safeIndex = (index ?? 0).clamp(0, _cloudChunkLengths.length - 1);
+    var start = 0;
+    for (var i = 0; i < safeIndex; i++) {
+      start += _cloudChunkLengths[i];
+    }
+    final end = start + _cloudChunkLengths[safeIndex];
+    _segmentCallback?.call(start, end);
   }
 
   bool get _shouldTryCloud {
@@ -1302,7 +1372,9 @@ class TtsService {
       final targetChars = isFirstGroup
           ? targetFirstChunkChars
           : targetNormalChunkChars;
-      final maxChars = isFirstGroup ? targetFirstChunkChars : maxNormalChunkChars;
+      final maxChars = isFirstGroup
+          ? targetFirstChunkChars
+          : maxNormalChunkChars;
 
       if (buffer.isEmpty) {
         buffer.write(chunk);
@@ -1311,7 +1383,8 @@ class TtsService {
 
       final nextLength = buffer.length + chunk.length;
       final canKeepGrowing = nextLength <= maxChars;
-      final shouldCloseCurrent = buffer.length >= targetChars || !canKeepGrowing;
+      final shouldCloseCurrent =
+          buffer.length >= targetChars || !canKeepGrowing;
 
       if (shouldCloseCurrent) {
         grouped.add(buffer.toString());
@@ -1325,7 +1398,9 @@ class TtsService {
     }
 
     if (buffer.isNotEmpty) {
-      if (grouped.isEmpty && buffer.length < minFirstChunkChars && chunks.length > 1) {
+      if (grouped.isEmpty &&
+          buffer.length < minFirstChunkChars &&
+          chunks.length > 1) {
         grouped.add(buffer.toString());
       } else {
         grouped.add(buffer.toString());

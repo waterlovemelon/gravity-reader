@@ -12,8 +12,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 class TtsAppState {
   final bool isSpeaking;
   final bool isPaused;
+  final bool isAudiobookUiVisible;
   final String? currentText;
+  final Book? currentBook;
   final int? currentStartOffset;
+  final int? currentChapterIndex;
+  final int? currentChapterLength;
+  final int? currentSegmentStartOffset;
+  final int? currentSegmentEndOffset;
   final double playbackProgress;
   final double speechRate;
   final double pitch;
@@ -26,8 +32,14 @@ class TtsAppState {
   const TtsAppState({
     this.isSpeaking = false,
     this.isPaused = false,
+    this.isAudiobookUiVisible = false,
     this.currentText,
+    this.currentBook,
     this.currentStartOffset,
+    this.currentChapterIndex,
+    this.currentChapterLength,
+    this.currentSegmentStartOffset,
+    this.currentSegmentEndOffset,
     this.playbackProgress = 0.0,
     this.speechRate = 1.0,
     this.pitch = 1.0,
@@ -41,10 +53,20 @@ class TtsAppState {
   TtsAppState copyWith({
     bool? isSpeaking,
     bool? isPaused,
+    bool? isAudiobookUiVisible,
     String? currentText,
     bool clearCurrentText = false,
+    Book? currentBook,
+    bool clearCurrentBook = false,
     int? currentStartOffset,
     bool clearCurrentStartOffset = false,
+    int? currentChapterIndex,
+    bool clearCurrentChapterIndex = false,
+    int? currentChapterLength,
+    bool clearCurrentChapterLength = false,
+    int? currentSegmentStartOffset,
+    int? currentSegmentEndOffset,
+    bool clearCurrentSegmentOffsets = false,
     double? playbackProgress,
     double? speechRate,
     double? pitch,
@@ -57,10 +79,24 @@ class TtsAppState {
     return TtsAppState(
       isSpeaking: isSpeaking ?? this.isSpeaking,
       isPaused: isPaused ?? this.isPaused,
+      isAudiobookUiVisible: isAudiobookUiVisible ?? this.isAudiobookUiVisible,
       currentText: clearCurrentText ? null : (currentText ?? this.currentText),
+      currentBook: clearCurrentBook ? null : (currentBook ?? this.currentBook),
       currentStartOffset: clearCurrentStartOffset
           ? null
           : (currentStartOffset ?? this.currentStartOffset),
+      currentChapterIndex: clearCurrentChapterIndex
+          ? null
+          : (currentChapterIndex ?? this.currentChapterIndex),
+      currentChapterLength: clearCurrentChapterLength
+          ? null
+          : (currentChapterLength ?? this.currentChapterLength),
+      currentSegmentStartOffset: clearCurrentSegmentOffsets
+          ? null
+          : (currentSegmentStartOffset ?? this.currentSegmentStartOffset),
+      currentSegmentEndOffset: clearCurrentSegmentOffsets
+          ? null
+          : (currentSegmentEndOffset ?? this.currentSegmentEndOffset),
       playbackProgress: playbackProgress ?? this.playbackProgress,
       speechRate: speechRate ?? this.speechRate,
       pitch: pitch ?? this.pitch,
@@ -108,9 +144,6 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
           state = state.copyWith(
             isSpeaking: false,
             isPaused: false,
-            clearCurrentText: true,
-            clearCurrentStartOffset: true,
-            playbackProgress: 0.0,
             isLoadingAudio: false,
           );
           break;
@@ -125,6 +158,17 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     });
     _ttsService.setProgressCallback((progress) {
       state = state.copyWith(playbackProgress: progress.clamp(0.0, 1.0));
+    });
+    _ttsService.setSegmentCallback((start, end) {
+      final baseOffset = state.currentStartOffset;
+      if (baseOffset == null || start == null || end == null) {
+        state = state.copyWith(clearCurrentSegmentOffsets: true);
+        return;
+      }
+      state = state.copyWith(
+        currentSegmentStartOffset: baseOffset + start,
+        currentSegmentEndOffset: baseOffset + end,
+      );
     });
     unawaited(_initialize());
   }
@@ -162,15 +206,27 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     await _initialize();
   }
 
-  Future<void> speak(String text, {int? startOffset}) async {
-    _trace('speak: textLength=${text.length}, selectedVoice=${state.selectedVoice}');
+  Future<void> speak(
+    String text, {
+    Book? book,
+    int? startOffset,
+    int? chapterIndex,
+    int? chapterLength,
+  }) async {
+    _trace(
+      'speak: textLength=${text.length}, selectedVoice=${state.selectedVoice}',
+    );
     state = state.copyWith(
       isSpeaking: false,
       isPaused: false,
       isLoadingAudio: true,
       playbackProgress: 0.0,
       currentText: text,
+      currentBook: book,
       currentStartOffset: startOffset,
+      currentChapterIndex: chapterIndex,
+      currentChapterLength: chapterLength,
+      clearCurrentSegmentOffsets: true,
     );
     try {
       await _ttsService.setVoice(state.selectedVoice);
@@ -178,13 +234,22 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       state = state.copyWith(
         isSpeaking: true,
         currentText: text,
+        currentBook: book,
         currentStartOffset: startOffset,
+        currentChapterIndex: chapterIndex,
+        currentChapterLength: chapterLength,
+        clearCurrentSegmentOffsets: true,
         playbackProgress: 0.0,
         isPaused: false,
         isLoadingAudio: false,
       );
     } catch (e) {
-      state = state.copyWith(isSpeaking: false, isLoadingAudio: false);
+      state = state.copyWith(
+        isSpeaking: false,
+        isLoadingAudio: false,
+        clearCurrentBook: true,
+        clearCurrentSegmentOffsets: true,
+      );
     }
   }
 
@@ -196,7 +261,11 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         isSpeaking: false,
         isPaused: false,
         clearCurrentText: true,
+        clearCurrentBook: true,
         clearCurrentStartOffset: true,
+        clearCurrentChapterIndex: true,
+        clearCurrentChapterLength: true,
+        clearCurrentSegmentOffsets: true,
         playbackProgress: 0.0,
         isLoadingAudio: false,
       );
@@ -237,6 +306,10 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     } catch (e) {
       // Handle error
     }
+  }
+
+  void setAudiobookUiVisible(bool isVisible) {
+    state = state.copyWith(isAudiobookUiVisible: isVisible);
   }
 
   Future<void> setSpeechRate(double rate) async {

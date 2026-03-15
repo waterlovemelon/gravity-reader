@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/book_providers.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_card_widget.dart';
 
@@ -25,15 +26,20 @@ class BookshelfGridWidget extends ConsumerWidget {
     }
 
     if (booksState.error != null) {
+      final theme = ref.watch(currentThemeProvider);
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.grey[400]),
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: theme.secondaryTextColor,
+            ),
             const SizedBox(height: 16),
             Text(
               'Failed to load books',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(color: theme.secondaryTextColor),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
@@ -48,6 +54,7 @@ class BookshelfGridWidget extends ConsumerWidget {
     }
 
     if (booksState.books.isEmpty) {
+      final theme = ref.watch(currentThemeProvider);
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -55,7 +62,7 @@ class BookshelfGridWidget extends ConsumerWidget {
             Icon(
               Icons.library_books_outlined,
               size: 64,
-              color: Colors.grey[400],
+              color: theme.secondaryTextColor,
             ),
             const SizedBox(height: 16),
             Text(
@@ -63,13 +70,13 @@ class BookshelfGridWidget extends ConsumerWidget {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: Colors.grey[600],
+                color: theme.secondaryTextColor,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Tap + to add your first book',
-              style: TextStyle(color: Colors.grey[500]),
+              style: TextStyle(color: theme.secondaryTextColor),
             ),
           ],
         ),

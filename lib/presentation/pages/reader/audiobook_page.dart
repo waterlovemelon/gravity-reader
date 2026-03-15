@@ -6,6 +6,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
 
 class AudiobookPage extends ConsumerStatefulWidget {
@@ -67,50 +68,25 @@ class _PlaybackSlice {
 
 class _AudiobookPageState extends ConsumerState<AudiobookPage>
     with SingleTickerProviderStateMixin {
-  static const Color _accentGreen = Color(0xFF10B981);
-  static const Color _accentGreenSoft = Color(0x2A16B981);
   late final Color _bgStart;
   late final Color _bgEnd;
   late final Color _textPrimary;
   late final Color _textSecondary;
   late final Color _textTertiary;
   late final Color _controlBgColor;
-
-  bool get _isDarkTheme {
-    return widget.bgColor != null &&
-        HSLColor.fromColor(widget.bgColor!).lightness < 0.2;
-  }
+  late final Color _accentGreen;
+  late final Color _accentGreenSoft;
 
   void _initColors() {
-    if (widget.bgColor == null) {
-      _bgStart = const Color(0xFFE9F1EE);
-      _bgEnd = const Color(0xFFE6F0EC);
-      _textPrimary = const Color(0xFF1F2937);
-      _textSecondary = const Color(0xFF6B7280);
-      _textTertiary = const Color(0xFF9CA3AF);
-      _controlBgColor = const Color(0xFFF5F8F6);
-    } else if (_isDarkTheme) {
-      // 黑色背景
-      _bgStart = const Color(0xFF111111);
-      _bgEnd = const Color(0xFF0A0A0A);
-      _textPrimary = Colors.white70;
-      _textSecondary = Colors.white54;
-      _textTertiary = Colors.white38;
-      _controlBgColor = const Color(0xFF1A1A1A);
-    } else {
-      // 浅色主题，基于传入的背景色
-      final baseHsl = HSLColor.fromColor(widget.bgColor!);
-      _bgStart = widget.bgColor!;
-      _bgEnd = baseHsl
-          .withLightness((baseHsl.lightness + 0.02).clamp(0.0, 1.0))
-          .toColor();
-      _textPrimary = const Color(0xFF1F2937);
-      _textSecondary = const Color(0xFF6B7280);
-      _textTertiary = const Color(0xFF9CA3AF);
-      _controlBgColor = baseHsl
-          .withLightness((baseHsl.lightness + 0.04).clamp(0.0, 1.0))
-          .toColor();
-    }
+    final theme = ref.read(currentThemeProvider);
+    _bgStart = theme.scaffoldBackgroundColor;
+    _bgEnd = theme.scaffoldBackgroundColor;
+    _textPrimary = theme.textColor;
+    _textSecondary = theme.secondaryTextColor;
+    _textTertiary = theme.secondaryTextColor.withOpacity(0.6);
+    _controlBgColor = theme.cardBackgroundColor;
+    _accentGreen = theme.primaryColor;
+    _accentGreenSoft = theme.primaryColor.withOpacity(0.16);
   }
 
   Timer? _progressTimer;
@@ -172,11 +148,17 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      ref.read(ttsProvider.notifier).setAudiobookUiVisible(true);
       await ref
           .read(ttsProvider.notifier)
           .selectVoiceForBook(widget.book, sampleText: _initialPlaybackText());
       final currentTtsState = ref.read(ttsProvider);
-      if (currentTtsState.isSpeaking || currentTtsState.isPaused) {
+      final isCurrentBookSession =
+          currentTtsState.currentBook?.id == widget.book.id &&
+          (currentTtsState.isSpeaking ||
+              currentTtsState.isPaused ||
+              currentTtsState.isLoadingAudio);
+      if (isCurrentBookSession) {
         if (currentTtsState.isSpeaking) {
           _startProgressTracking();
         }
@@ -199,9 +181,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     _progressTimer?.cancel();
     _ttsStateSubscription?.close();
     _discController.dispose();
-    try {
-      ref.read(ttsProvider.notifier).stop();
-    } catch (_) {}
+    ref.read(ttsProvider.notifier).setAudiobookUiVisible(false);
     super.dispose();
   }
 
@@ -286,7 +266,13 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       });
       await ref
           .read(ttsProvider.notifier)
-          .speak(text, startOffset: resolvedStartOffset);
+          .speak(
+            text,
+            book: widget.book,
+            startOffset: resolvedStartOffset,
+            chapterIndex: _activeChapterIndex,
+            chapterLength: _isChapterMode ? _safeChapterLength : null,
+          );
       _startProgressTracking();
     } catch (_) {
       _showToast('播放失败，请重试');
@@ -976,7 +962,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                             ),
                                           ),
                                           if (selected)
-                                            const Icon(
+                                            Icon(
                                               Icons.check_circle,
                                               color: _accentGreen,
                                               size: 18,

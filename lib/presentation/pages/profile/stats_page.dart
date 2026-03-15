@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/core/providers/book_providers.dart';
@@ -130,18 +131,19 @@ class StatsPage extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildSummaryCards(stats),
+                  _buildSummaryCards(stats, ref),
                   const SizedBox(height: 24),
-                  _buildWeeklyChart(stats),
+                  _buildWeeklyChart(stats, ref),
                   const SizedBox(height: 24),
-                  _buildCategoryBreakdown(stats),
+                  _buildCategoryBreakdown(stats, ref),
                 ],
               ),
             ),
     );
   }
 
-  Widget _buildSummaryCards(ReadingStatsState stats) {
+  Widget _buildSummaryCards(ReadingStatsState stats, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     return Row(
       children: [
         Expanded(
@@ -149,7 +151,7 @@ class StatsPage extends ConsumerWidget {
             icon: Icons.book,
             value: '${stats.totalBooksRead}',
             label: 'Books',
-            color: Colors.blue,
+            color: theme.primaryColor,
           ),
         ),
         const SizedBox(width: 12),
@@ -158,7 +160,7 @@ class StatsPage extends ConsumerWidget {
             icon: Icons.timer,
             value: _formatDuration(stats.totalReadingTimeSeconds),
             label: 'Time',
-            color: Colors.green,
+            color: theme.accentColor,
           ),
         ),
         const SizedBox(width: 12),
@@ -167,14 +169,15 @@ class StatsPage extends ConsumerWidget {
             icon: Icons.auto_stories,
             value: '${stats.totalPagesRead}',
             label: 'Pages',
-            color: Colors.orange,
+            color: theme.primaryColor,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildWeeklyChart(ReadingStatsState stats) {
+  Widget _buildWeeklyChart(ReadingStatsState stats, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -203,7 +206,7 @@ class StatsPage extends ConsumerWidget {
                       Container(
                         width: 30,
                         height: day.minutesRead.toDouble(),
-                        color: Colors.blue,
+                        color: theme.primaryColor,
                       ),
                     ],
                   );
@@ -216,7 +219,8 @@ class StatsPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategoryBreakdown(ReadingStatsState stats) {
+  Widget _buildCategoryBreakdown(ReadingStatsState stats, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     if (stats.categoryBreakdown.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -248,7 +252,10 @@ class StatsPage extends ConsumerWidget {
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
                       value: percentage / 100,
-                      backgroundColor: Colors.grey[200],
+                      backgroundColor: theme.dividerColor,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        theme.primaryColor,
+                      ),
                     ),
                   ],
                 ),
@@ -267,7 +274,7 @@ class StatsPage extends ConsumerWidget {
   }
 }
 
-class _StatCard extends StatelessWidget {
+class _StatCard extends ConsumerWidget {
   final IconData icon;
   final String value;
   final String label;
@@ -281,7 +288,8 @@ class _StatCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -291,11 +299,15 @@ class _StatCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               value,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: theme.textColor,
+              ),
             ),
             Text(
               label,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 12, color: theme.secondaryTextColor),
             ),
           ],
         ),

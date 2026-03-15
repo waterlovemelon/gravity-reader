@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 
-class BookCardWidget extends StatelessWidget {
+class BookCardWidget extends ConsumerWidget {
   final Book book;
   final double? progress;
   final VoidCallback? onTap;
@@ -17,7 +19,8 @@ class BookCardWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     return LayoutBuilder(
       builder: (context, constraints) {
         final infoHeight = progress != null
@@ -48,9 +51,10 @@ class BookCardWidget extends StatelessWidget {
                   children: [
                     Text(
                       book.title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: theme.textColor,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -59,7 +63,10 @@ class BookCardWidget extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         book.author!,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.secondaryTextColor,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -68,9 +75,9 @@ class BookCardWidget extends StatelessWidget {
                       const SizedBox(height: 4),
                       LinearProgressIndicator(
                         value: progress!,
-                        backgroundColor: Colors.grey[200],
+                        backgroundColor: theme.dividerColor,
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          Theme.of(context).primaryColor,
+                          theme.primaryColor,
                         ),
                       ),
                     ],

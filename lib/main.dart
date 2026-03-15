@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/presentation/pages/main_navigation_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
 
@@ -12,36 +13,34 @@ class MyReaderApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MyReader',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2196F3),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2196F3),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      home: const MainNavigationPage(),
-      onGenerateRoute: (settings) {
-        final uri = Uri.parse(settings.name ?? '');
+    return Consumer(
+      builder: (context, ref, child) {
+        // 监听主题变化
+        final currentTheme = ref.watch(currentThemeProvider);
 
-        if (uri.pathSegments.isNotEmpty && uri.pathSegments[0] == 'reader') {
-          final bookId = uri.pathSegments.length > 1 ? uri.pathSegments[1] : '';
-          return MaterialPageRoute(
-            builder: (context) => ReaderPage(bookId: bookId),
-          );
-        }
+        return MaterialApp(
+          title: 'MyReader',
+          debugShowCheckedModeBanner: false,
+          theme: currentTheme.toThemeData(),
+          themeMode: ThemeMode.light, // 当前主要支持浅色主题
+          home: const MainNavigationPage(),
+          onGenerateRoute: (settings) {
+            final uri = Uri.parse(settings.name ?? '');
 
-        return MaterialPageRoute(
-          builder: (context) => const MainNavigationPage(),
+            if (uri.pathSegments.isNotEmpty &&
+                uri.pathSegments[0] == 'reader') {
+              final bookId = uri.pathSegments.length > 1
+                  ? uri.pathSegments[1]
+                  : '';
+              return MaterialPageRoute(
+                builder: (context) => ReaderPage(bookId: bookId),
+              );
+            }
+
+            return MaterialPageRoute(
+              builder: (context) => const MainNavigationPage(),
+            );
+          },
         );
       },
     );

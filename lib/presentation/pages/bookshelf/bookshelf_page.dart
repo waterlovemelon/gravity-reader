@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/data/services/txt_parser.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/flureadium_integration/epub_parser.dart';
@@ -61,23 +62,35 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                   }
                 },
               )
-            : Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.search, size: 18, color: Colors.grey),
-                    SizedBox(width: 8),
-                    Text(
-                      '史上最强炼气期',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+            : Builder(
+                builder: (context) {
+                  final theme = ref.watch(currentThemeProvider);
+                  return Container(
+                    height: 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: theme.dividerColor,
+                      borderRadius: BorderRadius.circular(18),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.search,
+                          size: 18,
+                          color: theme.secondaryTextColor,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '史上最强炼气期',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: theme.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
         actions: [
           IconButton(
@@ -303,9 +316,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
       // Save to database
       await ref.read(booksProvider.notifier).addBook(book);
-      await ref.read(ttsProvider.notifier).warmUpVoicesForBooks(
-        ref.read(booksProvider).books,
-      );
+      await ref
+          .read(ttsProvider.notifier)
+          .warmUpVoicesForBooks(ref.read(booksProvider).books);
 
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog
@@ -413,21 +426,22 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   }
 }
 
-class _ShelfTab extends StatelessWidget {
+class _ShelfTab extends ConsumerWidget {
   final String label;
   final bool selected;
 
   const _ShelfTab({required this.label, this.selected = false});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     return Padding(
       padding: const EdgeInsets.only(right: 16),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 14,
-          color: selected ? Theme.of(context).colorScheme.primary : Colors.grey,
+          color: selected ? theme.primaryColor : theme.secondaryTextColor,
           fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
         ),
       ),
