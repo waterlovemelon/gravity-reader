@@ -593,18 +593,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     return Stack(
       children: [
-        // 底层：全局点击检测（无双击，立即响应翻页）
+        // 底层：全局单击检测（立即响应）
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: (details) {
-            final tapDownTime = DateTime.now().millisecondsSinceEpoch;
-            print(
-              '👆 onTapDown 触发 at $tapDownTime, 位置: ${details.localPosition}',
-            );
-          },
           onTapUp: (details) {
-            final tapUpTime = DateTime.now().millisecondsSinceEpoch;
-            print('👆🏻 onTapUp 触发 at $tapUpTime');
             _handleTap(details, totalPages);
           },
           child: Stack(
@@ -612,15 +604,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               NotificationListener<ScrollNotification>(
                 onNotification: (notification) {
                   if (notification is ScrollStartNotification) {
-                    print('📜 ScrollStartNotification 触发');
                     _setUserPaging(true);
                   } else if (notification is ScrollEndNotification) {
-                    print('📜 ScrollEndNotification 触发');
                     _setUserPaging(false);
-                  } else {
-                    print(
-                      '📜 其他 ScrollNotification: ${notification.runtimeType}',
-                    );
                   }
                   return false;
                 },
@@ -629,11 +615,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   itemCount: totalPages,
                   pageSnapping: true,
                   onPageChanged: (page) {
-                    final pageChangedTime =
-                        DateTime.now().microsecondsSinceEpoch;
-                    print(
-                      '🟢 onPageChanged 触发! page=$page, _currentPage=$_currentPage',
-                    );
                     setState(() {
                       _currentPage = page;
                     });
@@ -641,11 +622,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       _scheduleSaveTxtProgress(book);
                     }
                     if (_lastPageTurnStart != null) {
-                      final pageChangeLatency =
-                          (pageChangedTime - _lastPageTurnStart!) / 1000.0;
-                      print(
-                        '✅ onPageChanged 触发: 翻页总延迟 = ${pageChangeLatency}ms',
-                      );
                       _lastPageTurnStart = null;
                     }
                   },
@@ -670,28 +646,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               _buildFloatingAudiobookButton(book, totalPages),
               // 悬浮播放控制按钮(播放时显示)
               _buildPlaybackControlButton(book, totalPages),
-              // 中间区域双击检测层（只覆盖中间 50%×50% 区域）
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final side = constraints.maxWidth * 0.5;
-                  final left = (constraints.maxWidth - side) / 2;
-                  final top = (constraints.maxHeight - side) / 2;
-                  return Positioned(
-                    left: left,
-                    top: top,
-                    width: side,
-                    height: side,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent, // 只响应双击，不阻挡单击
-                      onDoubleTapDown: (details) {
-                        print('👆👆 双击在中间 50%×50% 区域，启动听书');
-                        _handleDoubleTap(book, totalPages);
-                      },
-                      child: const SizedBox.shrink(), // 不占空间
-                    ),
-                  );
-                },
-              ),
             ],
           ),
         ), // GestureDetector 闭合
@@ -2384,13 +2338,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final width = MediaQuery.of(context).size.width;
     final dx = details.localPosition.dx;
 
-    print('📍 点击位置: dx=$dx, 宽度=$width');
-    print(
-      '🔍 点击时状态: _currentPage=$_currentPage, _isUserPaging=$_isUserPaging, _lastPageTurnStart=$_lastPageTurnStart',
-    );
-
     if (dx < width * 0.3) {
-      print('👈 ← 点击左侧区域，向前翻页');
       if (_txtPages.isNotEmpty && _currentPage == 0) {
         _handleTxtEdgePaging(previous: true);
       }
@@ -2400,7 +2348,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     if (dx > width * 0.7) {
-      print('👉 → 点击右侧区域，向后翻页');
       if (_txtPages.isNotEmpty && _currentPage >= totalPages - 1) {
         _handleTxtEdgePaging(previous: false);
       }
@@ -2409,24 +2356,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
 
-    print('🎯 点击中间区域，切换控制面板');
     setState(() {
       _showControls = !_showControls;
     });
     _applySystemUiVisibility();
-  }
-
-  bool _isInAudiobookTriggerZone(Offset localPosition) {
-    final size = MediaQuery.of(context).size;
-    final side = size.width * 0.5;
-    final left = (size.width - side) / 2;
-    final top = (size.height - side) / 2;
-    final rect = Rect.fromLTWH(left, top, side, side);
-    return rect.contains(localPosition);
-  }
-
-  void _handleDoubleTap(Book book, int totalPages) async {
-    await _startInlineAudiobook(book, totalPages);
   }
 
   _AudiobookLaunchData? _buildAudiobookLaunchData(Book book) {
@@ -2495,55 +2428,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return null;
     }
     return _AudiobookLaunchData(initialText: epubText);
-  }
-
-  String? _inlinePlaybackText(_AudiobookLaunchData launchData) {
-    final chapterText = launchData.chapterText;
-    if (chapterText != null && chapterText.trim().isNotEmpty) {
-      final safeStart = launchData.initialOffset.clamp(0, chapterText.length);
-      final remaining = chapterText.substring(safeStart).trim();
-      if (remaining.isNotEmpty) {
-        return remaining;
-      }
-    }
-
-    final initialText = launchData.initialText.trim();
-    return initialText.isEmpty ? null : initialText;
-  }
-
-  Future<void> _startInlineAudiobook(Book book, int totalPages) async {
-    final launchData = _buildAudiobookLaunchData(book);
-    if (!mounted || launchData == null) {
-      return;
-    }
-
-    final playbackText = _inlinePlaybackText(launchData);
-    if (playbackText == null || playbackText.isEmpty) {
-      return;
-    }
-
-    final notifier = ref.read(ttsProvider.notifier);
-    await notifier.selectVoiceForBook(book, sampleText: playbackText);
-    final currentState = ref.read(ttsProvider);
-    if (currentState.isSpeaking || currentState.isPaused) {
-      await notifier.stop();
-    }
-    await notifier.speak(
-      playbackText,
-      book: book,
-      startOffset: launchData.initialOffset,
-      chapterIndex: launchData.chapterIndex,
-      chapterLength: launchData.chapterText?.length,
-    );
-
-    if (launchData.nextChapterText != null &&
-        launchData.nextChapterText!.trim().isNotEmpty) {
-      unawaited(notifier.preloadUpcomingText(launchData.nextChapterText!));
-    }
-
-    if (!mounted) {
-      return;
-    }
   }
 
   Future<void> _openAudiobookSheet(Book book, int totalPages) async {
