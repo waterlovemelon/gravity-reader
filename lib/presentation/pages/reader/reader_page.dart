@@ -381,7 +381,8 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
   }
 }
 
-class _ReaderPageState extends ConsumerState<ReaderPage> {
+class _ReaderPageState extends ConsumerState<ReaderPage>
+    with SingleTickerProviderStateMixin {
   static const String _prefFontSizePreset = 'reader_font_size_preset_v1';
   static const String _prefPaddingPreset = 'reader_padding_preset_v1';
   static const String _prefLineHeightPreset = 'reader_line_height_preset_v1';
@@ -389,8 +390,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   static const String _prefParagraphIndent = 'reader_paragraph_indent_v1';
   static const String _prefFontStylePreset = 'reader_font_style_preset_v1';
   static const bool _enablePageCountMode = false;
-  final PageController _pageController = PageController();
+  // 禁用 keepPage 以避免 page storage 延迟
+  final PageController _pageController = PageController(keepPage: false);
   final int _fallbackPages = 100;
+  late final AnimationController _floatingCoverController;
 
   bool _showControls = false;
   int _currentPage = 0;
@@ -412,6 +415,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   final Map<String, List<_TxtPage>> _txtPageCache = {};
   bool _isUserPaging = false;
   Completer<void>? _pagingIdleCompleter;
+  int? _lastPageTurnStart; // 用于追踪翻页延迟
 
   Timer? _progressSaveDebounce;
   Timer? _repaginateDebounce;
@@ -429,11 +433,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   int _textAlignPreset = 0;
   bool _paragraphIndentEnabled = true;
   int _fontStylePreset = 0;
+  bool _isFloatingCoverSpinning = false;
+  Offset? _floatingPlaybackOffset;
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   @override
   void initState() {
     super.initState();
+    _floatingCoverController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 18),
+    );
     _applySystemUiVisibility();
     _loadReaderPreferences();
   }
@@ -444,6 +454,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _repaginateDebounce?.cancel();
     _readerPrefsSaveDebounce?.cancel();
     _autoPageTimer?.cancel();
+    _floatingCoverController.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pageController.dispose();
     super.dispose();
@@ -580,57 +591,112 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _ensureTxtPagination();
     }
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: (details) => _handleTap(details, totalPages),
-      onDoubleTapDown: (details) {
-        if (_isInAudiobookTriggerZone(details.localPosition)) {
-          _handleDoubleTap(book, totalPages);
-        }
-      },
-      child: Stack(
-        children: [
-          NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              if (notification is ScrollStartNotification) {
-                _setUserPaging(true);
-              } else if (notification is ScrollEndNotification) {
-                _setUserPaging(false);
-              }
-              return false;
-            },
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: totalPages,
-              onPageChanged: (page) {
-                setState(() {
-                  _currentPage = page;
-                });
-                if (_isTxtBook(book)) {
-                  _scheduleSaveTxtProgress(book);
-                }
-              },
-              itemBuilder: (context, index) =>
-                  _buildPageContent(index, book, ttsState),
-            ),
-          ),
-          _buildTopBar(book),
-          _buildBottomToolbar(book, totalPages),
-          if (!_showControls && _activePanel == _ReaderPanel.none)
-            _buildBottomPageIndicator(totalPages),
-          if (_brightnessValue < 0.5)
-            IgnorePointer(
-              child: Container(
-                color: Colors.black.withOpacity((0.5 - _brightnessValue) * 0.9),
+    return Stack(
+      children: [
+        // 底层：全局点击检测（无双击，立即响应翻页）
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) {
+            final tapDownTime = DateTime.now().millisecondsSinceEpoch;
+            print(
+              '👆 onTapDown 触发 at $tapDownTime, 位置: ${details.localPosition}',
+            );
+          },
+          onTapUp: (details) {
+            final tapUpTime = DateTime.now().millisecondsSinceEpoch;
+            print('👆🏻 onTapUp 触发 at $tapUpTime');
+            _handleTap(details, totalPages);
+          },
+          child: Stack(
+            children: [
+              NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification is ScrollStartNotification) {
+                    print('📜 ScrollStartNotification 触发');
+                    _setUserPaging(true);
+                  } else if (notification is ScrollEndNotification) {
+                    print('📜 ScrollEndNotification 触发');
+                    _setUserPaging(false);
+                  } else {
+                    print(
+                      '📜 其他 ScrollNotification: ${notification.runtimeType}',
+                    );
+                  }
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: totalPages,
+                  pageSnapping: true,
+                  onPageChanged: (page) {
+                    final pageChangedTime =
+                        DateTime.now().microsecondsSinceEpoch;
+                    print(
+                      '🟢 onPageChanged 触发! page=$page, _currentPage=$_currentPage',
+                    );
+                    setState(() {
+                      _currentPage = page;
+                    });
+                    if (_isTxtBook(book)) {
+                      _scheduleSaveTxtProgress(book);
+                    }
+                    if (_lastPageTurnStart != null) {
+                      final pageChangeLatency =
+                          (pageChangedTime - _lastPageTurnStart!) / 1000.0;
+                      print(
+                        '✅ onPageChanged 触发: 翻页总延迟 = ${pageChangeLatency}ms',
+                      );
+                      _lastPageTurnStart = null;
+                    }
+                  },
+                  itemBuilder: (context, index) =>
+                      _buildPageContent(index, book, ttsState),
+                ),
               ),
-            ),
-          // 悬浮听书按钮(非播放时显示)
-          _buildFloatingAudiobookButton(book, totalPages),
-          // 悬浮播放控制按钮(播放时显示)
-          _buildPlaybackControlButton(book, totalPages),
-        ],
-      ),
-    );
+              _buildTopBar(book),
+              _buildBottomToolbar(book, totalPages),
+              if (!_showControls && _activePanel == _ReaderPanel.none)
+                _buildBottomPageIndicator(totalPages),
+              // 临时注释：黑色蒙层可能挡住视线
+              // if (_brightnessValue < 0.5)
+              //   IgnorePointer(
+              //     child: Container(
+              //       color: Colors.black.withOpacity(
+              //         (0.5 - _brightnessValue) * 0.9,
+              //       ),
+              //     ),
+              //   ),
+              // 悬浮听书按钮(非播放时显示)
+              _buildFloatingAudiobookButton(book, totalPages),
+              // 悬浮播放控制按钮(播放时显示)
+              _buildPlaybackControlButton(book, totalPages),
+              // 中间区域双击检测层（只覆盖中间 50%×50% 区域）
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final side = constraints.maxWidth * 0.5;
+                  final left = (constraints.maxWidth - side) / 2;
+                  final top = (constraints.maxHeight - side) / 2;
+                  return Positioned(
+                    left: left,
+                    top: top,
+                    width: side,
+                    height: side,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent, // 只响应双击，不阻挡单击
+                      onDoubleTapDown: (details) {
+                        print('👆👆 双击在中间 50%×50% 区域，启动听书');
+                        _handleDoubleTap(book, totalPages);
+                      },
+                      child: const SizedBox.shrink(), // 不占空间
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ), // GestureDetector 闭合
+      ], // 最外层 Stack children 闭合
+    ); // 最外层 Stack 闭合
   }
 
   Widget _buildOpeningView(Book book) {
@@ -705,43 +771,72 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         pageEnd: safeEnd,
         visibleText: visibleText,
       );
+
+      // 只在正在播放且有高亮时，使用包含进度信息的 key 确保高亮更新
+      // 否则使用简化的 key 避免频繁重建
+      final useHighlightKey = ttsState.isSpeaking && highlightRange != null;
+      final pageBuildStart = DateTime.now().microsecondsSinceEpoch;
+
+      // 日志：记录页面重建原因
+      if (useHighlightKey) {
+        print('🎵 页面 $index 包含高亮 key（TTS 播放中）');
+      } else if (ttsState.isSpeaking) {
+        print('📄 页面 $index 使用简化 key（TTS 播放但无高亮）');
+      } else {
+        print('📄 页面 $index 使用简化 key（TTS 未播放）');
+      }
+
       return SafeArea(
         key: ValueKey(
           'reader-page-$index-'
-          '${ttsState.isSpeaking}-${ttsState.isPaused}-'
-          '${(ttsState.playbackProgress * 1000).round()}',
+          'speaking-${ttsState.isSpeaking}-'
+          'paused-${ttsState.isPaused}'
+          '${useHighlightKey ? '-highlight-${(ttsState.playbackProgress * 1000).round()}' : ''}',
         ),
         child: Padding(
           padding: _contentPadding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: SizedBox(
-                  width: double.infinity,
-                  child: RichText(
-                    textScaler: TextScaler.noScaling,
-                    textAlign: pageTextAlign,
-                    textWidthBasis: TextWidthBasis.longestLine,
-                    strutStyle: _contentStrutStyle,
-                    text: TextSpan(
-                      style: bodyStyle,
-                      children: _buildPageTextSpans(
-                        text: visibleText,
-                        bodyStyle: bodyStyle,
-                        chapterTitle: showChapterHeader ? page.title : null,
-                        startsAtParagraphBoundary: _startsAtParagraphBoundary(
-                          chapterText: chapterText,
-                          startOffset: safeStart,
+          child: Builder(
+            builder: (context) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final buildDuration =
+                    (DateTime.now().microsecondsSinceEpoch - pageBuildStart) /
+                    1000.0;
+                if (buildDuration > 2.0) {
+                  print('⚠️  页面 $index 构建耗时: ${buildDuration}ms');
+                }
+              });
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: RichText(
+                        textScaler: TextScaler.noScaling,
+                        textAlign: pageTextAlign,
+                        textWidthBasis: TextWidthBasis.longestLine,
+                        strutStyle: _contentStrutStyle,
+                        text: TextSpan(
+                          style: bodyStyle,
+                          children: _buildPageTextSpans(
+                            text: visibleText,
+                            bodyStyle: bodyStyle,
+                            chapterTitle: showChapterHeader ? page.title : null,
+                            startsAtParagraphBoundary:
+                                _startsAtParagraphBoundary(
+                                  chapterText: chapterText,
+                                  startOffset: safeStart,
+                                ),
+                            highlightStart: highlightRange?.start,
+                            highlightEnd: highlightRange?.end,
+                          ),
                         ),
-                        highlightStart: highlightRange?.start,
-                        highlightEnd: highlightRange?.end,
                       ),
                     ),
                   ),
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       );
@@ -941,7 +1036,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     bool active = false,
   }) {
     // 黑色背景时用更亮的颜色，浅色背景时用深色
-    final baseColor = _themeIndex == 3
+    final baseColor = _themeIndex == 4
         ? Colors.white70
         : const Color(0xFF1F2A1F);
     return IconButton(
@@ -1141,12 +1236,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       ),
       _ThemeOption(
         id: 2,
+        color: const Color(0xFFF1F4EE),
+        name: '薄荷绿',
+        icon: Icons.emoji_nature_rounded,
+      ),
+      _ThemeOption(
+        id: 3,
         color: const Color(0xFFA6C39D),
         name: '绿色',
         icon: Icons.nature_rounded,
       ),
       _ThemeOption(
-        id: 3,
+        id: 4,
         color: const Color(0xFF111111),
         name: '深色',
         icon: Icons.dark_mode_rounded,
@@ -1345,11 +1446,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Theme color selection - 2x2 grid
+                        // Theme color selection - 3 columns top, 2 columns bottom
                         SizedBox(
-                          height: 160,
+                          height: 240,
                           child: Column(
                             children: [
+                              // First row: 3 columns
                               Row(
                                 children: [
                                   Expanded(
@@ -1373,11 +1475,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                       },
                                     ),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
+                                  const SizedBox(width: 12),
                                   Expanded(
                                     child: _ColorOptionCard(
                                       theme: themeColors[2],
@@ -1388,13 +1486,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                       },
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              // Second row: 2 columns, centered
+                              Row(
+                                children: [
                                   Expanded(
                                     child: _ColorOptionCard(
                                       theme: themeColors[3],
                                       isSelected: _themeIndex == 3,
                                       onTap: () {
                                         setState(() => _themeIndex = 3);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _ColorOptionCard(
+                                      theme: themeColors[4],
+                                      isSelected: _themeIndex == 4,
+                                      onTap: () {
+                                        setState(() => _themeIndex = 4);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1981,47 +2095,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
-  Widget _settingEntryButton({
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(22),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Container(
-          height: 46,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _textColor.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: _textColor.withOpacity(0.92),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 2),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 22,
-                color: _textColor.withOpacity(0.45),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _showFontStyleAndLayoutPanel() async {
     const styleOptions = ['默认', '衬线', '等宽'];
     const alignOptions = ['自动', '两端', '左对齐', '居中'];
@@ -2116,30 +2189,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           );
         },
       ),
-    );
-  }
-
-  Widget _buildSteppedSlider({
-    required int value,
-    int min = 0,
-    required int max,
-    bool showDivisions = true,
-    required ValueChanged<int> onChanged,
-  }) {
-    if (_isIOS) {
-      return CupertinoSlider(
-        value: value.toDouble().clamp(min.toDouble(), max.toDouble()),
-        min: min.toDouble(),
-        max: max.toDouble(),
-        onChanged: (v) => onChanged(v.round()),
-      );
-    }
-    return _buildThemedSlider(
-      value: value.toDouble(),
-      min: min.toDouble(),
-      max: max.toDouble(),
-      divisions: showDivisions ? (max - min) : null,
-      onChanged: (v) => onChanged(v.round()),
     );
   }
 
@@ -2331,25 +2380,36 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   void _handleTap(TapUpDetails details, int totalPages) {
+    final tapStart = DateTime.now().microsecondsSinceEpoch;
     final width = MediaQuery.of(context).size.width;
     final dx = details.localPosition.dx;
 
+    print('📍 点击位置: dx=$dx, 宽度=$width');
+    print(
+      '🔍 点击时状态: _currentPage=$_currentPage, _isUserPaging=$_isUserPaging, _lastPageTurnStart=$_lastPageTurnStart',
+    );
+
     if (dx < width * 0.3) {
+      print('👈 ← 点击左侧区域，向前翻页');
       if (_txtPages.isNotEmpty && _currentPage == 0) {
         _handleTxtEdgePaging(previous: true);
       }
-      _turnPage(forward: false, totalPages: totalPages);
+      _turnPage(forward: false, totalPages: totalPages, tapStart: tapStart);
+      _lastPageTurnStart = tapStart;
       return;
     }
 
     if (dx > width * 0.7) {
+      print('👉 → 点击右侧区域，向后翻页');
       if (_txtPages.isNotEmpty && _currentPage >= totalPages - 1) {
         _handleTxtEdgePaging(previous: false);
       }
-      _turnPage(forward: true, totalPages: totalPages);
+      _turnPage(forward: true, totalPages: totalPages, tapStart: tapStart);
+      _lastPageTurnStart = tapStart;
       return;
     }
 
+    print('🎯 点击中间区域，切换控制面板');
     setState(() {
       _showControls = !_showControls;
     });
@@ -2366,7 +2426,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   void _handleDoubleTap(Book book, int totalPages) async {
-    await _openAudiobookSheet(book, totalPages);
+    await _startInlineAudiobook(book, totalPages);
   }
 
   _AudiobookLaunchData? _buildAudiobookLaunchData(Book book) {
@@ -2437,6 +2497,55 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return _AudiobookLaunchData(initialText: epubText);
   }
 
+  String? _inlinePlaybackText(_AudiobookLaunchData launchData) {
+    final chapterText = launchData.chapterText;
+    if (chapterText != null && chapterText.trim().isNotEmpty) {
+      final safeStart = launchData.initialOffset.clamp(0, chapterText.length);
+      final remaining = chapterText.substring(safeStart).trim();
+      if (remaining.isNotEmpty) {
+        return remaining;
+      }
+    }
+
+    final initialText = launchData.initialText.trim();
+    return initialText.isEmpty ? null : initialText;
+  }
+
+  Future<void> _startInlineAudiobook(Book book, int totalPages) async {
+    final launchData = _buildAudiobookLaunchData(book);
+    if (!mounted || launchData == null) {
+      return;
+    }
+
+    final playbackText = _inlinePlaybackText(launchData);
+    if (playbackText == null || playbackText.isEmpty) {
+      return;
+    }
+
+    final notifier = ref.read(ttsProvider.notifier);
+    await notifier.selectVoiceForBook(book, sampleText: playbackText);
+    final currentState = ref.read(ttsProvider);
+    if (currentState.isSpeaking || currentState.isPaused) {
+      await notifier.stop();
+    }
+    await notifier.speak(
+      playbackText,
+      book: book,
+      startOffset: launchData.initialOffset,
+      chapterIndex: launchData.chapterIndex,
+      chapterLength: launchData.chapterText?.length,
+    );
+
+    if (launchData.nextChapterText != null &&
+        launchData.nextChapterText!.trim().isNotEmpty) {
+      unawaited(notifier.preloadUpcomingText(launchData.nextChapterText!));
+    }
+
+    if (!mounted) {
+      return;
+    }
+  }
+
   Future<void> _openAudiobookSheet(Book book, int totalPages) async {
     final launchData = _buildAudiobookLaunchData(book);
     if (!mounted || launchData == null) {
@@ -2484,6 +2593,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       },
     );
 
+    ref.read(ttsProvider.notifier).setAudiobookUiVisible(false);
     _applySystemUiVisibility();
 
     if (result != null) {
@@ -2529,6 +2639,32 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       }
       await _openAudiobookSheet(book, totalPages);
     }
+  }
+
+  Future<void> _toggleReaderPlayback({
+    required Book book,
+    required int totalPages,
+    required TtsAppState ttsState,
+    required bool canPlay,
+  }) async {
+    final isLoadingAudio =
+        ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
+    final canTapPlayback = canPlay && (!isLoadingAudio || ttsState.isPaused);
+    if (!canTapPlayback) {
+      return;
+    }
+
+    if (ttsState.isPaused) {
+      await ref.read(ttsProvider.notifier).resume();
+      return;
+    }
+
+    if (ttsState.isSpeaking) {
+      await ref.read(ttsProvider.notifier).pause();
+      return;
+    }
+
+    await _openAudiobookSheet(book, totalPages);
   }
 
   int? _nextTxtChapterIndex(int? currentChapterIndex) {
@@ -2597,31 +2733,102 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _restorePageAfterBuild(target);
   }
 
-  void _jumpToPage(int page) {
+  void _jumpToPage(int page, {int? tapStart, int? computeStart}) {
+    final jumpStart = DateTime.now().microsecondsSinceEpoch;
+    final currentPageBefore = _pageController.hasClients
+        ? _pageController.page
+        : null;
+
     if (!_pageController.hasClients) {
+      print('❌ _jumpToPage: pageController has no clients');
       return;
     }
-    _pageController.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
+
+    // 检查 PageController 是否正在动画中或忙
+    final position = _pageController.position;
+    print(
+      '🔍 PageController 状态: hasClients=true, page=$currentPageBefore, position=$position',
     );
+
+    // 直接跳转以提供即时响应，快速点击时也能正常工作
+    print('🔄 _jumpToPage: 从页面 ${currentPageBefore ?? "null"} 跳转到 $page');
+    _pageController.jumpToPage(page);
+
+    final jumpEnd = DateTime.now().microsecondsSinceEpoch;
+    final currentPageAfter = _pageController.page;
+
+    // 打印时间戳日志
+    if (tapStart != null) {
+      print('📊 翻页延迟分析:');
+      print('  点击事件 → _handleTap: 0ms');
+      print(
+        '  _handleTap → _turnPage: ${(computeStart! - tapStart) / 1000}μs = ${(computeStart! - tapStart) / 1000.0}ms',
+      );
+      print(
+        '  _turnPage → _jumpToPage: ${(jumpStart - computeStart!) / 1000}μs = ${(jumpStart - computeStart!) / 1000.0}ms',
+      );
+      print(
+        '  _jumpToPage 完成: ${(jumpEnd - jumpStart) / 1000}μs = ${(jumpEnd - jumpStart) / 1000.0}ms',
+      );
+      print('  跳转前页面: $currentPageBefore, 跳转后页面: $currentPageAfter');
+      print(
+        '  总耗时: ${(jumpEnd - tapStart) / 1000}μs = ${(jumpEnd - tapStart) / 1000.0}ms',
+      );
+    }
+
+    // 添加延时的帧检查
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final frameTime = DateTime.now().microsecondsSinceEpoch;
+      final currentPageInFrame = _pageController.page;
+      if (tapStart != null && _lastPageTurnStart == tapStart) {
+        print(
+          '🎯 下一帧检查: 帧延迟 = ${(frameTime - tapStart) / 1000.0}ms, 当前页 = $currentPageInFrame',
+        );
+      }
+    });
+
+    // 再添加一个更长时间的检查（500ms 后），确认页面是否真的更新了
+    Future.delayed(const Duration(milliseconds: 500), () {
+      final delayedPage = _pageController.page;
+      if (tapStart != null && _lastPageTurnStart == null) {
+        // 如果 500ms 后 _lastPageTurnStart 还是 null，说明 onPageChanged 已经触发
+        print('⏰ 500ms 后检查: 页面已更新到 $delayedPage，onPageChanged 已触发');
+      } else if (tapStart != null && _lastPageTurnStart != null) {
+        // 如果 500ms 后 _lastPageTurnStart 还在，说明 onPageChanged 仍未触发
+        print('⚠️  500ms 后检查: 页面当前为 $delayedPage，但 onPageChanged 尚未触发！');
+      }
+    });
   }
 
-  void _turnPage({required bool forward, required int totalPages}) {
+  void _turnPage({
+    required bool forward,
+    required int totalPages,
+    int? tapStart,
+  }) {
+    final computeStart = DateTime.now().microsecondsSinceEpoch;
     final target = forward
         ? min(totalPages - 1, _currentPage + 1)
         : max(0, _currentPage - 1);
+
+    print(
+      '🎯 _turnPage: forward=$forward, _currentPage=$_currentPage, target=$target, totalPages=$totalPages',
+    );
+
     if (target == _currentPage) {
+      print('⛔ _turnPage: 目标页面 $target 等于当前页面 $_currentPage，不翻页');
       return;
     }
-    _jumpToPage(target);
+
+    print('✓ _turnPage: 准备跳转到页面 $target');
+    _jumpToPage(target, tapStart: tapStart, computeStart: computeStart);
   }
 
   void _setUserPaging(bool paging) {
     if (_isUserPaging == paging) {
+      print('⚠️  _setUserPaging: 状态已经是 $paging，跳过设置');
       return;
     }
+    print('🔄 _setUserPaging: 从 $_isUserPaging 改变为 $paging');
     _isUserPaging = paging;
     if (!paging) {
       _pagingIdleCompleter?.complete();
@@ -3290,41 +3497,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     if (!ttsState.isSpeaking && !ttsState.isPaused) {
       return null;
     }
-    final currentText = ttsState.currentText?.trim();
-    if (currentText == null || currentText.isEmpty || chapterText.isEmpty) {
+    final segmentStart = ttsState.currentSegmentStartOffset;
+    final segmentEnd = ttsState.currentSegmentEndOffset;
+    if (chapterText.isEmpty ||
+        segmentStart == null ||
+        segmentEnd == null ||
+        segmentStart < 0 ||
+        segmentEnd <= segmentStart ||
+        segmentEnd > chapterText.length) {
       return null;
     }
-
-    final playbackStart = ttsState.currentStartOffset;
-    if (playbackStart == null ||
-        playbackStart < 0 ||
-        playbackStart >= chapterText.length) {
+    if (segmentEnd <= pageStart || segmentStart >= pageEnd) {
       return null;
     }
-
-    final progressedChars = (currentText.length * ttsState.playbackProgress)
-        .floor();
-    final currentOffset = (playbackStart + progressedChars).clamp(
-      0,
-      chapterText.length,
-    );
-    if (currentOffset < pageStart || currentOffset > pageEnd) {
-      return null;
-    }
-
-    final segmentRange = _resolveTtsSegmentRange(
-      chapterText: chapterText,
-      currentOffset: currentOffset,
-    );
-    if (segmentRange == null) {
-      return null;
-    }
-
-    final highlightText = chapterText.substring(
-      segmentRange.start,
-      segmentRange.end,
-    );
-    final approximateStart = max(0, segmentRange.start - pageStart);
+    final highlightText = chapterText.substring(segmentStart, segmentEnd);
+    final approximateStart = max(0, segmentStart - pageStart);
     final matchedIndex = visibleText.indexOf(highlightText, approximateStart);
     final localStart = matchedIndex >= 0 ? matchedIndex : approximateStart;
     final localEnd = min(visibleText.length, localStart + highlightText.length);
@@ -3332,71 +3519,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       return null;
     }
     return TextRange(start: localStart, end: localEnd);
-  }
-
-  TextRange? _resolveTtsSegmentRange({
-    required String chapterText,
-    required int currentOffset,
-  }) {
-    if (chapterText.isEmpty) {
-      return null;
-    }
-
-    final safeOffset = currentOffset
-        .clamp(0, max(0, chapterText.length - 1))
-        .toInt();
-    var start = safeOffset;
-    while (start > 0) {
-      final char = chapterText[start - 1];
-      if (_isTtsSegmentBoundary(char)) {
-        break;
-      }
-      start--;
-    }
-
-    while (start < safeOffset && chapterText[start].trim().isEmpty) {
-      start++;
-    }
-
-    var end = safeOffset;
-    while (end < chapterText.length) {
-      final char = chapterText[end];
-      end++;
-      if (_isTtsSegmentBoundary(char)) {
-        break;
-      }
-    }
-
-    while (end > start && chapterText[end - 1].trim().isEmpty) {
-      end--;
-    }
-
-    if (start >= end) {
-      return null;
-    }
-    return TextRange(start: start, end: end);
-  }
-
-  bool _isTtsSegmentBoundary(String char) {
-    const boundaries = <String>{
-      '。',
-      '！',
-      '？',
-      '.',
-      '!',
-      '?',
-      '；',
-      ';',
-      '…',
-      '，',
-      ',',
-      '、',
-      ':',
-      '：',
-      '\n',
-      '\r',
-    };
-    return boundaries.contains(char);
   }
 
   String _paragraphIndentPrefixForText(String text) {
@@ -4236,6 +4358,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     const palette = [
       Color(0xFFF3F3F3),
       Color(0xFFE8E2D6),
+      Color(0xFFF1F4EE),
       Color(0xFFA6C39D),
       Color(0xFF111111),
     ];
@@ -4253,35 +4376,39 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Color get _textColor =>
-      _themeIndex == 3 ? Colors.white70 : const Color(0xFF1F2A1F);
+      _themeIndex == 4 ? Colors.white70 : const Color(0xFF1F2A1F);
 
-  Color get _ttsHighlightColor => _themeIndex == 3
+  Color get _ttsHighlightColor => _themeIndex == 4
       ? const Color(0xFF4C7D5B).withValues(alpha: 0.72)
       : const Color(0xFFBFE7A8).withValues(alpha: 0.9);
 
   Color get _ttsHighlightTextColor =>
-      _themeIndex == 3 ? Colors.white : const Color(0xFF182118);
+      _themeIndex == 4 ? Colors.white : const Color(0xFF182118);
 
   Widget _buildFloatingAudiobookButton(Book book, int totalPages) {
     final ttsState = ref.watch(ttsProvider);
     const buttonSize = 54.0;
+    final viewPadding = MediaQuery.of(context).viewPadding;
 
-    // 按钮背景色随主题联动
-    final buttonBgColor = _themeIndex == 3
-        ? Colors.white.withOpacity(0.15)
-        : const Color(0xFF456757).withOpacity(0.92);
+    final buttonBgColor = _controlSurfaceColor;
 
     // 图标颜色
-    final iconColor = _themeIndex == 3
-        ? Colors.white70
-        : Colors.white.withOpacity(0.95);
+    final iconColor = _textColor;
 
     // 非播放状态才显示听书按钮
-    final shouldShow = _showControls && !ttsState.isSpeaking;
+    final isLoadingAudio =
+        ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
+    if (ttsState.isSpeaking ||
+        ttsState.isPaused ||
+        isLoadingAudio ||
+        ttsState.isAudiobookUiVisible) {
+      return const SizedBox.shrink();
+    }
+    final shouldShow = _showControls && !isLoadingAudio;
 
     return Positioned(
       right: 16,
-      bottom: mediaQueryPadding.bottom + 78,
+      bottom: viewPadding.bottom + 78,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
@@ -4326,73 +4453,235 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   Widget _buildPlaybackControlButton(Book book, int totalPages) {
     final ttsState = ref.watch(ttsProvider);
-    const buttonSize = 54.0;
-
-    // 按钮背景色随主题联动
-    final buttonBgColor = _themeIndex == 3
-        ? Colors.white.withOpacity(0.15)
-        : const Color(0xFF456757).withOpacity(0.92);
-
-    // 图标颜色
-    final iconColor = _themeIndex == 3
-        ? Colors.white70
-        : Colors.white.withOpacity(0.95);
-
-    // 仅在播放状态时显示
-    final shouldShow = _showControls && ttsState.isSpeaking;
+    const capsuleWidth = 164.0;
+    const capsuleHeight = 59.0;
+    const coverSize = 49.0;
+    const ringSize = 55.0;
+    const actionButtonSize = 34.0;
+    final launchData = _buildAudiobookLaunchData(book);
+    final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
+    final isLoadingAudio =
+        ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
+    final canPlay =
+        launchData != null ||
+        ttsState.isSpeaking ||
+        ttsState.isPaused ||
+        isLoadingAudio;
+    final canTapPlayback = canPlay && (!isLoadingAudio || ttsState.isPaused);
+    final shouldShow =
+        !ttsState.isAudiobookUiVisible &&
+        (ttsState.isSpeaking || ttsState.isPaused || isLoadingAudio);
+    final capsuleColor = _controlSurfaceColor;
+    final primaryIconColor = _textColor;
+    final secondaryIconColor = _textColor.withOpacity(0.78);
+    final progressColor = _themeIndex == 4
+        ? Colors.white.withOpacity(0.82)
+        : const Color(0xFFF0F8F2);
+    final trackColor = _themeIndex == 4
+        ? Colors.white.withOpacity(0.14)
+        : Colors.white.withOpacity(0.18);
+    final coverPath = book.coverPath;
+    final coverFile = coverPath != null && coverPath.isNotEmpty
+        ? File(coverPath)
+        : null;
+    final hasCover = coverFile != null && coverFile.existsSync();
+    final chapterProgress = _currentChapterReadingProgress(book, totalPages);
+    final mediaSize = MediaQuery.of(context).size;
+    final viewPadding = MediaQuery.of(context).viewPadding;
+    final defaultOffset = Offset(
+      16,
+      mediaSize.height - viewPadding.bottom - 78 - capsuleHeight,
+    );
+    final resolvedOffset = _clampFloatingPlaybackOffset(
+      _floatingPlaybackOffset ?? defaultOffset,
+      screenSize: mediaSize,
+      width: capsuleWidth,
+      height: capsuleHeight,
+    );
+    _syncFloatingCoverSpin(isPlaying);
 
     return Positioned(
-      left: 16,
-      bottom: mediaQueryPadding.bottom + 78,
+      left: resolvedOffset.dx,
+      top: resolvedOffset.dy,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
         opacity: shouldShow ? 1.0 : 0.0,
         child: IgnorePointer(
           ignoring: !shouldShow,
-          child: GestureDetector(
-            onTap: () async {
-              if (ttsState.isSpeaking) {
-                // 暂停播放
-                await ref.read(ttsProvider.notifier).pause();
-              } else if (ttsState.isPaused) {
-                // 恢复播放
-                await ref.read(ttsProvider.notifier).resume();
-              } else {
-                // 开始播放
-                await _openAudiobookSheet(book, totalPages);
-              }
-            },
-            child: Container(
-              width: buttonSize,
-              height: buttonSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: buttonBgColor,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Stack(
-                children: [
-                  Center(
-                    child: Icon(
-                      ttsState.isSpeaking
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      size: 32,
-                      color: iconColor,
+          child: AnimatedSlide(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            offset: shouldShow ? Offset.zero : const Offset(-0.08, 0),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              onPanUpdate: (details) {
+                setState(() {
+                  _floatingPlaybackOffset = _clampFloatingPlaybackOffset(
+                    resolvedOffset + details.delta,
+                    screenSize: mediaSize,
+                    width: capsuleWidth,
+                    height: capsuleHeight,
+                  );
+                });
+              },
+              child: Container(
+                width: capsuleWidth,
+                height: capsuleHeight,
+                decoration: BoxDecoration(
+                  color: capsuleColor,
+                  borderRadius: BorderRadius.circular(capsuleHeight / 2),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(
+                      _themeIndex == 4 ? 0.16 : 0.24,
                     ),
+                    width: 1,
                   ),
-                  if (ttsState.isSpeaking)
-                    Positioned.fill(
-                      child: Center(child: _buildPulseWave(buttonSize)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 14,
+                      offset: const Offset(0, 7),
                     ),
-                ],
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () async => _openAudiobookSheet(book, totalPages),
+                      child: SizedBox(
+                        width: ringSize,
+                        height: ringSize,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            SizedBox(
+                              width: ringSize,
+                              height: ringSize,
+                              child: CircularProgressIndicator(
+                                value: chapterProgress,
+                                strokeWidth: 3,
+                                color: progressColor,
+                                backgroundColor: trackColor,
+                                strokeCap: StrokeCap.round,
+                              ),
+                            ),
+                            RotationTransition(
+                              turns: _floatingCoverController,
+                              child: Container(
+                                width: coverSize,
+                                height: coverSize,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withOpacity(0.26),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.44),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(3),
+                                  child: ClipOval(
+                                    child: hasCover
+                                        ? Image.file(
+                                            coverFile,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                _buildFloatingPlaybackCoverPlaceholder(
+                                                  book,
+                                                ),
+                                          )
+                                        : _buildFloatingPlaybackCoverPlaceholder(
+                                            book,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        splashColor: Colors.white.withOpacity(0.14),
+                        highlightColor: Colors.transparent,
+                        onTap: canTapPlayback
+                            ? () => unawaited(
+                                _toggleReaderPlayback(
+                                  book: book,
+                                  totalPages: totalPages,
+                                  ttsState: ttsState,
+                                  canPlay: canPlay,
+                                ),
+                              )
+                            : null,
+                        child: SizedBox(
+                          width: actionButtonSize,
+                          height: actionButtonSize,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(
+                                isPlaying
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                size: 22,
+                                color: primaryIconColor,
+                              ),
+                              if (isLoadingAudio)
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              primaryIconColor,
+                                            ),
+                                        backgroundColor: Colors.white
+                                            .withOpacity(0.14),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        splashColor: Colors.white.withOpacity(0.14),
+                        highlightColor: Colors.transparent,
+                        onTap: () async {
+                          await ref.read(ttsProvider.notifier).stop();
+                        },
+                        child: SizedBox(
+                          width: actionButtonSize,
+                          height: actionButtonSize,
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 22,
+                            color: secondaryIconColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                  ],
+                ),
               ),
             ),
           ),
@@ -4401,29 +4690,96 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     );
   }
 
-  Widget _buildPulseWave(double baseSize) {
-    final waveColor = _themeIndex == 3 ? Colors.white : Colors.blue;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 1500),
-      builder: (context, value, child) {
-        return Container(
-          width: baseSize + (value * 24),
-          height: baseSize + (value * 24),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: waveColor.withOpacity(0.6 - (value * 0.6)),
-              width: 2,
-            ),
+  Offset _clampFloatingPlaybackOffset(
+    Offset offset, {
+    required Size screenSize,
+    required double width,
+    required double height,
+  }) {
+    final viewPadding = MediaQuery.of(context).viewPadding;
+    final minLeft = 8.0;
+    final maxLeft = screenSize.width - width - 8.0;
+    final minTop = viewPadding.top + 8.0;
+    final maxTop = screenSize.height - viewPadding.bottom - height - 8.0;
+    return Offset(
+      offset.dx.clamp(minLeft, maxLeft),
+      offset.dy.clamp(minTop, maxTop),
+    );
+  }
+
+  void _syncFloatingCoverSpin(bool shouldSpin) {
+    if (shouldSpin == _isFloatingCoverSpinning) {
+      return;
+    }
+    _isFloatingCoverSpinning = shouldSpin;
+    if (shouldSpin) {
+      _floatingCoverController.repeat();
+    } else {
+      _floatingCoverController.stop();
+    }
+  }
+
+  double _currentChapterReadingProgress(Book book, int totalPages) {
+    final ttsState = ref.read(ttsProvider);
+    final chapterLength = ttsState.currentChapterLength;
+    final chapterStartOffset = ttsState.currentStartOffset;
+    final currentText = ttsState.currentText;
+    if (chapterLength != null &&
+        chapterLength > 0 &&
+        chapterStartOffset != null &&
+        currentText != null &&
+        (ttsState.isSpeaking || ttsState.isPaused || ttsState.isLoadingAudio)) {
+      final progressedChars = (currentText.length * ttsState.playbackProgress)
+          .round();
+      final chapterOffset = chapterStartOffset + progressedChars;
+      return (chapterOffset / chapterLength).clamp(0.0, 1.0);
+    }
+
+    if (!_isTxtBook(book) || _txtPages.isEmpty) {
+      return ((_currentPage + 1) / max(1, totalPages)).clamp(0.0, 1.0);
+    }
+
+    final safePage = _currentPage.clamp(0, _txtPages.length - 1);
+    final currentChapterIndex = _txtPages[safePage].chapterIndex;
+    var chapterStartPage = safePage;
+    while (chapterStartPage > 0 &&
+        _txtPages[chapterStartPage - 1].chapterIndex == currentChapterIndex) {
+      chapterStartPage--;
+    }
+
+    var chapterEndPage = safePage;
+    while (chapterEndPage < _txtPages.length - 1 &&
+        _txtPages[chapterEndPage + 1].chapterIndex == currentChapterIndex) {
+      chapterEndPage++;
+    }
+
+    final chapterPageCount = chapterEndPage - chapterStartPage + 1;
+    final pageProgress = safePage - chapterStartPage + 1;
+    return (pageProgress / max(1, chapterPageCount)).clamp(0.0, 1.0);
+  }
+
+  Widget _buildFloatingPlaybackCoverPlaceholder(Book book) {
+    final title = book.title.trim();
+    final initials = title.isEmpty ? '读' : title.substring(0, 1);
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF7FBF7), Color(0xFFB9D4BD)],
+        ),
+      ),
+      child: Center(
+        child: Text(
+          initials,
+          style: TextStyle(
+            color: const Color(0xFF365446).withOpacity(0.88),
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
           ),
-        );
-      },
-      onEnd: () {
-        if (mounted) {
-          setState(() {}); // 触发重建以重复动画
-        }
-      },
+        ),
+      ),
     );
   }
 
