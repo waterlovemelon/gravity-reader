@@ -124,11 +124,22 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Handle database migrations here
-    // Example:
-    // if (oldVersion < 2) {
-    //   await db.execute('ALTER TABLE books ADD COLUMN new_column TEXT');
-    // }
+    if (oldVersion < 2) {
+      // Migration for cover_path support
+      // Check if cover_path column exists in books table
+      final columns = await db.rawQuery("PRAGMA table_info(books)");
+      final hasCoverPath = columns.any(
+        (column) => column['name'] == 'cover_path',
+      );
+
+      if (!hasCoverPath) {
+        print('Migrating database: Adding cover_path column to books table');
+        await db.execute('ALTER TABLE books ADD COLUMN cover_path TEXT');
+        print('Migration successful: cover_path column added');
+      } else {
+        print('Migration skipped: cover_path column already exists');
+      }
+    }
   }
 
   Future<void> close() async {

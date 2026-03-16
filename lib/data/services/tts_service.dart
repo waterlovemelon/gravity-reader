@@ -593,6 +593,7 @@ class TtsService {
     if (playerState.processingState == ProcessingState.completed) {
       final currentIndex = _player.currentIndex ?? 0;
       final hasFetchedAllChunks = _cloudQueuedCount >= _cloudChunks.length;
+      final isPlayingLastChunk = currentIndex >= _cloudChunks.length - 1;
 
       _log(
         'cloud: completed reached, '
@@ -601,11 +602,12 @@ class TtsService {
         'durationMs=${_player.duration?.inMilliseconds ?? -1}, '
         'queuedCount=$_cloudQueuedCount, '
         'chunkCount=${_cloudChunkLengths.length}, '
-        'hasFetchedAllChunks=$hasFetchedAllChunks',
+        'hasFetchedAllChunks=$hasFetchedAllChunks, '
+        'isPlayingLastChunk=$isPlayingLastChunk',
       );
 
-      // Only stop if we've fetched and played all chunks
-      if (hasFetchedAllChunks) {
+      // Only stop if we've fetched all chunks AND playing the last chunk
+      if (hasFetchedAllChunks && isPlayingLastChunk) {
         _log('cloud: all chunks played, dispatching stopped.');
         _setState(TtsState.stopped);
         _resetCloudQueueState();

@@ -729,16 +729,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       // 只在正在播放且有高亮时，使用包含进度信息的 key 确保高亮更新
       // 否则使用简化的 key 避免频繁重建
       final useHighlightKey = ttsState.isSpeaking && highlightRange != null;
-      final pageBuildStart = DateTime.now().microsecondsSinceEpoch;
-
-      // 日志：记录页面重建原因
-      if (useHighlightKey) {
-        print('🎵 页面 $index 包含高亮 key（TTS 播放中）');
-      } else if (ttsState.isSpeaking) {
-        print('📄 页面 $index 使用简化 key（TTS 播放但无高亮）');
-      } else {
-        print('📄 页面 $index 使用简化 key（TTS 未播放）');
-      }
 
       return SafeArea(
         key: ValueKey(
@@ -751,14 +741,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           padding: _contentPadding,
           child: Builder(
             builder: (context) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                final buildDuration =
-                    (DateTime.now().microsecondsSinceEpoch - pageBuildStart) /
-                    1000.0;
-                if (buildDuration > 2.0) {
-                  print('⚠️  页面 $index 构建耗时: ${buildDuration}ms');
-                }
-              });
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -2525,6 +2507,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
   }
 
+  /// 直接开始播放，不打开全屏界面，让悬浮控制面板显示
+  Future<void> _startFloatingPlayback({
+    required Book book,
+    required int totalPages,
+  }) async {
+    final launchData = _buildAudiobookLaunchData(book);
+    if (!mounted || launchData == null) {
+      return;
+    }
+
+    try {
+      // 选择音色
+      await ref
+          .read(ttsProvider.notifier)
+          .selectVoiceForBook(book, sampleText: launchData.initialText);
+
+      // 准备播放文本和参数
+      final textToSpeak = launchData.chapterText?.trim().isNotEmpty == true
+          ? launchData.initialText
+          : launchData.initialText;
+
+      if (textToSpeak == null || textToSpeak.trim().isEmpty) {
+        return;
+      }
+
+      // 开始播放（不打开全屏界面，isAudiobookUiVisible 保持为 false）
+      await ref
+          .read(ttsProvider.notifier)
+          .speak(
+            textToSpeak,
+            book: book,
+            startOffset: launchData.initialOffset,
+            chapterIndex: launchData.chapterIndex,
+            chapterLength: launchData.chapterText?.length,
+          );
+    } catch (_) {
+      // 播放失败，静默处理
+    }
+  }
+
   Future<void> _toggleReaderPlayback({
     required Book book,
     required int totalPages,
@@ -2548,7 +2570,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
 
-    await _openAudiobookSheet(book, totalPages);
+    // 修改为直接开始播放，不打开全屏界面
+    await _startFloatingPlayback(book: book, totalPages: totalPages);
   }
 
   int? _nextTxtChapterIndex(int? currentChapterIndex) {
@@ -4301,7 +4324,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           ignoring: !shouldShow,
           child: GestureDetector(
             onTap: () async {
-              await _openAudiobookSheet(book, totalPages);
+              await _startFloatingPlayback(book: book, totalPages: totalPages);
             },
             child: Container(
               width: buttonSize,

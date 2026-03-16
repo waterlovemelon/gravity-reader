@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:charset_converter/charset_converter.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/data/services/txt_parser.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/flureadium_integration/epub_parser.dart';
@@ -190,6 +192,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.image),
+              title: const Text('设置封面'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickAndUpdateCover(bookId);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text('Delete', style: TextStyle(color: Colors.red)),
               onTap: () {
@@ -219,11 +229,90 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               ref.read(booksProvider.notifier).deleteBook(bookId);
               Navigator.pop(context);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _pickAndUpdateCover(String bookId) async {
+    try {
+      final picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) {
+        return;
+      }
+
+      // Get the book
+      final book = ref
+          .read(booksProvider)
+          .books
+          .firstWhere((b) => b.id == bookId);
+
+      // Save image to app document directory
+      final appDir = await getApplicationDocumentsDirectory();
+      final coversDir = Directory('${appDir.path}/covers');
+      if (!await coversDir.exists()) {
+        await coversDir.create(recursive: true);
+      }
+
+      // Use the original file extension from the image path
+      final imagePath = image.path;
+      final fileExtension = imagePath.contains('.')
+          ? imagePath.split('.').last.toLowerCase()
+          : 'jpg';
+      final coverFileName = '${book.id}.$fileExtension';
+      final coverFilePath = '${coversDir.path}/$coverFileName';
+      final previousCoverPath = book.coverPath;
+
+      // Convert XFile to File and copy to covers directory
+      final sourceFile = File(imagePath);
+      await sourceFile.copy(coverFilePath);
+      if (previousCoverPath != null && previousCoverPath.isNotEmpty) {
+        await FileImage(File(previousCoverPath)).evict();
+      }
+      await FileImage(File(coverFilePath)).evict();
+
+      // Update book with new cover path
+      final updatedBook = Book(
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        coverPath: coverFilePath,
+        epubPath: book.epubPath,
+        totalPages: book.totalPages,
+        fileSize: book.fileSize,
+        importedAt: book.importedAt,
+        lastReadAt: book.lastReadAt,
+        categoryId: book.categoryId,
+      );
+
+      // Update book in database
+      final updateBookUseCase = ref.read(updateBookUseCaseProvider);
+      await updateBookUseCase(updatedBook);
+
+      // Reload books to refresh UI
+      await ref.read(booksProvider.notifier).loadBooks();
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('封面已更新')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('更新封面失败: $e')));
+      }
+    }
   }
 
   Future<void> _importBook() async {

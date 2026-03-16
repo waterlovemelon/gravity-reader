@@ -3,7 +3,7 @@ class AppConstants {
   static const String appVersion = '1.0.0';
   static const packageName = 'com.myreader.app';
   static const String databaseName = 'myreader.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 2;
   static const String keySettings = 'app_settings';
   static const String keyTtsSelectedVoice = 'tts_selected_voice';
   static const String keyTtsBookVoiceMap = 'tts_book_voice_map_v1';
