@@ -919,9 +919,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: 2,
-                                mainAxisSpacing: 10,
-                                crossAxisSpacing: 10,
-                                childAspectRatio: 1.42,
+                                mainAxisSpacing: 8,
+                                crossAxisSpacing: 8,
+                                childAspectRatio: 2.8,
                               ),
                           itemBuilder: (context, index) {
                             final voice = voices[index];
@@ -933,9 +933,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                               color: selected
                                   ? _accentGreen.withValues(alpha: 0.18)
                                   : Colors.black.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(12),
                               child: InkWell(
-                                borderRadius: BorderRadius.circular(14),
+                                borderRadius: BorderRadius.circular(12),
                                 onTap: () async {
                                   final shouldRestart =
                                       state.isSpeaking || state.isPaused;
@@ -955,15 +955,14 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                   _showToast('已切换为 $name');
                                 },
                                 child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    12,
-                                    10,
-                                    12,
-                                    10,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
                                   ),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Row(
                                         children: [
@@ -974,7 +973,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
                                                 color: _textPrimary,
-                                                fontSize: 14,
+                                                fontSize: 13,
                                                 fontWeight: selected
                                                     ? FontWeight.w700
                                                     : FontWeight.w600,
@@ -985,25 +984,25 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                             Icon(
                                               Icons.check_circle,
                                               color: _accentGreen,
-                                              size: 18,
+                                              size: 16,
                                             ),
                                         ],
                                       ),
-                                      const SizedBox(height: 8),
+                                      const SizedBox(height: 4),
                                       Text(
                                         traits.isNotEmpty
-                                            ? traits.join(' / ')
+                                            ? traits.first
                                             : (languageCode
                                                       .toLowerCase()
                                                       .startsWith('zh')
                                                   ? '默认'
                                                   : 'Default'),
-                                        maxLines: 3,
+                                        maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           color: _textSecondary,
-                                          fontSize: 12,
-                                          height: 1.3,
+                                          fontSize: 11,
+                                          height: 1.2,
                                         ),
                                       ),
                                     ],
