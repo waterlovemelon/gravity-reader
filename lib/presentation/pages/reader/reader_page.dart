@@ -9,14 +9,17 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/models/reader_background.dart';
 import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
+import 'package:myreader/core/providers/reader_background_pod.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/data/services/txt_parser.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/pages/reader/audiobook_page.dart';
+import 'package:myreader/presentation/widgets/reader/background_image_card.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -465,22 +468,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Widget build(BuildContext context) {
     final bookAsync = ref.watch(bookByIdProvider(widget.bookId));
     final currentBook = bookAsync.valueOrNull ?? widget.initialBook;
+    final bgProvider = ref.watch(readerBackgroundProvider);
 
     return WillPopScope(
       onWillPop: () async {
         await _persistCurrentBookProgress(currentBook);
         return true;
       },
-      child: Scaffold(
-        backgroundColor: _readerBgColor,
-        body: bookAsync.when(
-          data: (book) => _buildReader(book ?? widget.initialBook),
-          loading: () => widget.initialBook != null
-              ? _buildReader(widget.initialBook)
-              : const Center(child: CircularProgressIndicator()),
-          error: (error, stack) => widget.initialBook != null
-              ? _buildReader(widget.initialBook)
-              : Center(child: Text('Error: $error')),
+      child: Container(
+        decoration: _getReaderBackgroundDecoration(bgProvider.background),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: bookAsync.when(
+            data: (book) => _buildReader(book ?? widget.initialBook),
+            loading: () => widget.initialBook != null
+                ? _buildReader(widget.initialBook)
+                : const Center(child: CircularProgressIndicator()),
+            error: (error, stack) => widget.initialBook != null
+                ? _buildReader(widget.initialBook)
+                : Center(child: Text('Error: $error')),
+          ),
         ),
       ),
     );
@@ -638,6 +645,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       _buildPageContent(index, book, ttsState),
                 ),
               ),
+              // 自定义图片背景遮罩层
+              _buildBackgroundOverlay(),
               _buildTopBar(book),
               _buildBottomToolbar(book, totalPages),
               if (!_showControls && _activePanel == _ReaderPanel.none)
@@ -1405,6 +1414,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       isSelected: _themeIndex == 0,
                                       onTap: () {
                                         setState(() => _themeIndex = 0);
+                                        ref.read(readerBackgroundProvider.notifier).setColorBackground(_themeIndex);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1416,6 +1426,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       isSelected: _themeIndex == 1,
                                       onTap: () {
                                         setState(() => _themeIndex = 1);
+                                        ref.read(readerBackgroundProvider.notifier).setColorBackground(_themeIndex);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1427,6 +1438,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       isSelected: _themeIndex == 2,
                                       onTap: () {
                                         setState(() => _themeIndex = 2);
+                                        ref.read(readerBackgroundProvider.notifier).setColorBackground(_themeIndex);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1443,6 +1455,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       isSelected: _themeIndex == 3,
                                       onTap: () {
                                         setState(() => _themeIndex = 3);
+                                        ref.read(readerBackgroundProvider.notifier).setColorBackground(_themeIndex);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1454,6 +1467,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       isSelected: _themeIndex == 4,
                                       onTap: () {
                                         setState(() => _themeIndex = 4);
+                                        ref.read(readerBackgroundProvider.notifier).setColorBackground(_themeIndex);
                                         setModalState(() {});
                                       },
                                     ),
@@ -1464,6 +1478,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           ),
                         ),
                         const SizedBox(height: 20),
+                        // 自定义背景图片
+                        _buildCustomBackgroundSection(setModalState),
                       ],
                     ),
                   ],
@@ -1474,6 +1490,316 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         },
       ),
     );
+  }
+
+  /// 构建自定义图片背景遮罩层
+  Widget _buildBackgroundOverlay() {
+    final bgProvider = ref.watch(readerBackgroundProvider);
+    
+    // 只在自定义图片背景时显示遮罩
+    if (!bgProvider.isCustomImage) {
+      return const SizedBox.shrink();
+    }
+    
+    return IgnorePointer(
+      child: Container(
+        color: Colors.black.withOpacity(bgProvider.background.overlayOpacity),
+      ),
+    );
+  }
+
+  /// 构建自定义背景图片部分
+  Widget _buildCustomBackgroundSection(StateSetter setModalState) {
+    final bgProvider = ref.watch(readerBackgroundProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: _readerBgColor,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 标题和上传按钮
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _textColor.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.image_rounded,
+                            size: 18,
+                            color: _textColor.withOpacity(0.7),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          '自定义背景',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: _textColor,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                    // 上传按钮
+                    Row(
+                      children: [
+                        // 相册上传
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => _handleUploadCustomImage(setModalState),
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF3B82F6).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: const Color(0xFF3B82F6).withOpacity(0.2),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.photo_library_rounded,
+                                    size: 16,
+                                    color: const Color(0xFF3B82F6),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '相册',
+                                    style: TextStyle(
+                                      color: const Color(0xFF3B82F6),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // 相机上传（仅iOS）
+                        if (_isIOS)
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _handleUploadCustomImage(setModalState, fromCamera: true),
+                              borderRadius: BorderRadius.circular(999),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF3B82F6).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: const Color(0xFF3B82F6).withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.camera_alt_rounded,
+                                      size: 16,
+                                      color: const Color(0xFF3B82F6),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '拍照',
+                                      style: TextStyle(
+                                        color: const Color(0xFF3B82F6),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // 预设背景图片
+              const SizedBox(height: 8),
+              _buildPresetBackgroundGrid(setModalState),
+              const SizedBox(height: 12),
+              // 自定义图片列表
+              if (bgProvider.customImages.isNotEmpty) _buildCustomBackgroundGrid(setModalState),
+              // 遮罩强度调节器
+              if (bgProvider.isCustomImage) ...[
+                const SizedBox(height: 16),
+                OverlayOpacitySlider(
+                  value: bgProvider.background.overlayOpacity,
+                  onChanged: (value) {
+                    ref.read(readerBackgroundProvider.notifier).setOverlayOpacity(value);
+                    setModalState(() {});
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建预设背景图片网格
+  Widget _buildPresetBackgroundGrid(StateSetter setModalState) {
+    final bgProvider = ref.watch(readerBackgroundProvider);
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 0.75,
+      ),
+      itemCount: ReaderBackground.presetBackgrounds.length,
+      itemBuilder: (context, index) {
+        final preset = ReaderBackground.presetBackgrounds[index];
+        final isSelected = bgProvider.background.type == BackgroundType.customImage &&
+            bgProvider.background.customImagePath == 'preset:${preset.id}';
+        return BackgroundImageCard(
+          preset: preset,
+          isSelected: isSelected,
+          onTap: () {
+            ref.read(readerBackgroundProvider.notifier).setPresetBackground(preset.id);
+            setModalState(() {});
+          },
+        );
+      },
+    );
+  }
+
+  /// 构建自定义背景图片网格
+  Widget _buildCustomBackgroundGrid(StateSetter setModalState) {
+    final bgProvider = ref.watch(readerBackgroundProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          '自定义图片',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _textColor.withOpacity(0.7),
+          ),
+        ),
+        const SizedBox(height: 8),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 0.75,
+          ),
+          itemCount: bgProvider.customImages.length,
+          itemBuilder: (context, index) {
+            final custom = bgProvider.customImages[index];
+            final isSelected = bgProvider.background.type == BackgroundType.customImage &&
+                bgProvider.background.customImagePath == custom.path;
+            return BackgroundImageCard(
+              custom: custom,
+              isSelected: isSelected,
+              onTap: () {
+                ref.read(readerBackgroundProvider.notifier).setCustomImageBackground(
+                      custom.path,
+                      custom.fileName,
+                    );
+                setModalState(() {});
+              },
+              onDelete: () => _handleDeleteCustomImage(custom.path, setModalState),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 处理上传自定义图片
+  Future<void> _handleUploadCustomImage(StateSetter setModalState, {bool fromCamera = false}) async {
+    try {
+      final imagePath = await ref.read(readerBackgroundProvider.notifier).uploadCustomImage(
+            fromCamera: fromCamera,
+          );
+      if (imagePath != null) {
+        ref.read(readerBackgroundProvider.notifier).setCustomImageBackground(
+              imagePath,
+              DateTime.now().millisecondsSinceEpoch.toString(),
+            );
+        setModalState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('上传失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// 处理删除自定义图片
+  Future<void> _handleDeleteCustomImage(String path, StateSetter setModalState) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: const Text('确定要删除这张背景图片吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(readerBackgroundProvider.notifier).deleteCustomImage(path);
+      setModalState(() {});
+    }
   }
 
   Widget _ColorOptionCard({
@@ -4295,6 +4621,52 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       Color(0xFF111111),
     ];
     return palette[_themeIndex.clamp(0, palette.length - 1)];
+  }
+
+  /// 获取阅读器背景装饰（支持颜色和图片）
+  BoxDecoration _getReaderBackgroundDecoration(ReaderBackground background) {
+    if (background.type == BackgroundType.customImage) {
+      // 自定义图片背景
+      return BoxDecoration(
+        color: _readerBgColor, // 占位色，图片加载前显示
+        image: DecorationImage(
+          image: _getBackgroundImageProvider(background),
+          fit: BoxFit.cover,
+          onError: (error, stackTrace) {
+            debugPrint('Background image error: $error');
+          },
+        ),
+      );
+    } else if (background.colorIndex != null) {
+      // 颜色背景
+      return BoxDecoration(
+        color: _readerBgColor,
+      );
+    }
+    // 默认背景
+    return BoxDecoration(
+      color: _readerBgColor,
+    );
+  }
+
+  /// 获取背景图片提供者
+  ImageProvider _getBackgroundImageProvider(ReaderBackground background) {
+    if (background.customImagePath == null) {
+      return const AssetImage('assets/backgrounds/paper_texture.jpg');
+    }
+    final path = background.customImagePath!;
+    if (path.startsWith('preset:')) {
+      // 预设图片
+      final presetId = path.substring(7);
+      final preset = ReaderBackground.presetBackgrounds.firstWhere(
+        (p) => p.id == presetId,
+        orElse: () => ReaderBackground.presetBackgrounds[0],
+      );
+      return AssetImage(preset.assetPath);
+    } else {
+      // 自定义图片
+      return FileImage(File(path));
+    }
   }
 
   Color get _controlSurfaceColor {
