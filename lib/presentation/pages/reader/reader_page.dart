@@ -9,6 +9,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
@@ -594,11 +595,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return Stack(
       children: [
         // 底层：全局单击检测（立即响应）
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (details) {
-            _handleTap(details, totalPages);
+        // 只处理点击，不参与拖动手势竞技，避免干扰 PageView 的滑动
+        RawGestureDetector(
+          gestures: <Type, GestureRecognizerFactory>{
+            TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(),
+              (TapGestureRecognizer instance) {
+                instance.onTapUp = (details) {
+                  _handleTap(details, totalPages);
+                };
+              },
+            ),
           },
+          behavior: HitTestBehavior.translucent,
           child: Stack(
             children: [
               NotificationListener<ScrollNotification>(
@@ -2523,28 +2532,44 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           .read(ttsProvider.notifier)
           .selectVoiceForBook(book, sampleText: launchData.initialText);
 
-      // 准备播放文本和参数
-      final textToSpeak = launchData.chapterText?.trim().isNotEmpty == true
-          ? launchData.initialText
-          : launchData.initialText;
+      final textToSpeak = launchData.initialText;
 
-      if (textToSpeak == null || textToSpeak.trim().isEmpty) {
+      if (textToSpeak.trim().isEmpty) {
         return;
       }
 
-      // 开始播放（不打开全屏界面，isAudiobookUiVisible 保持为 false）
       await ref
           .read(ttsProvider.notifier)
           .speak(
             textToSpeak,
             book: book,
+            chapterTitle: launchData.chapterTitle,
             startOffset: launchData.initialOffset,
             chapterIndex: launchData.chapterIndex,
             chapterLength: launchData.chapterText?.length,
+            chapterQueue: _mapTtsChapterQueue(launchData.chapterQueue),
+            continuousChapterQueue: true,
           );
     } catch (_) {
       // 播放失败，静默处理
     }
+  }
+
+  List<TtsChapterPayload> _mapTtsChapterQueue(
+    List<AudiobookChapterPayload> queue,
+  ) {
+    if (queue.isEmpty) {
+      return const <TtsChapterPayload>[];
+    }
+    return queue
+        .map(
+          (item) => TtsChapterPayload(
+            title: item.title,
+            text: item.text,
+            index: item.index,
+          ),
+        )
+        .toList(growable: false);
   }
 
   Future<void> _toggleReaderPlayback({

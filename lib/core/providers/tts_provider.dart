@@ -5,6 +5,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/constants/app_constants.dart';
+import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/data/services/tts_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,6 +29,7 @@ class TtsAppState {
   final List<TtsVoice> availableVoices;
   final bool isLoadingVoices;
   final bool isLoadingAudio;
+  final List<TtsChapterPayload> chapterQueue;
 
   const TtsAppState({
     this.isSpeaking = false,
@@ -48,6 +50,7 @@ class TtsAppState {
     this.availableVoices = const <TtsVoice>[],
     this.isLoadingVoices = false,
     this.isLoadingAudio = false,
+    this.chapterQueue = const <TtsChapterPayload>[],
   });
 
   TtsAppState copyWith({
@@ -75,6 +78,8 @@ class TtsAppState {
     List<TtsVoice>? availableVoices,
     bool? isLoadingVoices,
     bool? isLoadingAudio,
+    List<TtsChapterPayload>? chapterQueue,
+    bool clearChapterQueue = false,
   }) {
     return TtsAppState(
       isSpeaking: isSpeaking ?? this.isSpeaking,
@@ -105,6 +110,9 @@ class TtsAppState {
       availableVoices: availableVoices ?? this.availableVoices,
       isLoadingVoices: isLoadingVoices ?? this.isLoadingVoices,
       isLoadingAudio: isLoadingAudio ?? this.isLoadingAudio,
+      chapterQueue: clearChapterQueue
+          ? const <TtsChapterPayload>[]
+          : (chapterQueue ?? this.chapterQueue),
     );
   }
 }
@@ -115,6 +123,10 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       <String, List<TtsVoice>>{};
   final Map<String, String> _bookVoiceAssignments = <String, String>{};
   Future<void>? _initializeFuture;
+  bool _suppressAutoAdvanceOnce = false;
+  bool _autoAdvanceInProgress = false;
+  bool _uiHandlesChapterAdvance = false;
+  bool _serviceHandlesChapterQueue = false;
 
   TtsNotifier() : _ttsService = TtsService(), super(const TtsAppState()) {
     _ttsService.setStateCallback((ttsState) {
@@ -141,6 +153,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
           );
           break;
         case TtsState.stopped:
+          _serviceHandlesChapterQueue = false;
           state = state.copyWith(
             isSpeaking: false,
             isPaused: false,
@@ -156,8 +169,25 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         'currentTextLength=${state.currentText?.length ?? 0}',
       );
     });
+    _ttsService.setCompletionCallback(() => _handlePlaybackCompletion());
     _ttsService.setProgressCallback((progress) {
       state = state.copyWith(playbackProgress: progress.clamp(0.0, 1.0));
+    });
+    _ttsService.setChapterChangedCallback((chapterIndex, chapterLength) {
+      final currentIndex = state.currentChapterIndex;
+      final didChapterChange =
+          currentIndex != null && currentIndex != chapterIndex;
+      final nextText = didChapterChange
+          ? _chapterTextFromQueue(chapterIndex)
+          : state.currentText;
+      state = state.copyWith(
+        currentChapterIndex: chapterIndex,
+        currentChapterLength: chapterLength,
+        currentStartOffset: didChapterChange ? 0 : state.currentStartOffset,
+        currentText: nextText,
+        clearCurrentSegmentOffsets: didChapterChange,
+        playbackProgress: didChapterChange ? 0.0 : state.playbackProgress,
+      );
     });
     _ttsService.setSegmentCallback((start, end) {
       final baseOffset = state.currentStartOffset;
@@ -171,6 +201,73 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       );
     });
     unawaited(_initialize());
+  }
+
+  bool _handlePlaybackCompletion() {
+    if (_autoAdvanceInProgress) {
+      return false;
+    }
+    if (_suppressAutoAdvanceOnce) {
+      _suppressAutoAdvanceOnce = false;
+      _trace('auto advance suppressed by manual stop');
+      return false;
+    }
+    if (_uiHandlesChapterAdvance) {
+      return false;
+    }
+    if (_serviceHandlesChapterQueue) {
+      return false;
+    }
+    final wasActive = state.isSpeaking || state.isPaused;
+    if (!wasActive) {
+      return false;
+    }
+    final queue = state.chapterQueue;
+    if (queue.isEmpty) {
+      return false;
+    }
+    final currentIndex = state.currentChapterIndex;
+    if (currentIndex == null) {
+      return false;
+    }
+    final currentPos = queue.indexWhere((item) => item.index == currentIndex);
+    if (currentPos < 0 || currentPos + 1 >= queue.length) {
+      return false;
+    }
+    final next = queue[currentPos + 1];
+    _trace(
+      'auto advance: current=$currentIndex -> next=${next.index}, '
+      'queuePos=$currentPos, queueSize=${queue.length}',
+    );
+    unawaited(_autoAdvanceToNextChapter(next, state));
+    return true;
+  }
+
+  Future<void> _autoAdvanceToNextChapter(
+    TtsChapterPayload next,
+    TtsAppState previousState,
+  ) async {
+    _autoAdvanceInProgress = true;
+    try {
+      state = state.copyWith(
+        isSpeaking: false,
+        isPaused: false,
+        isLoadingAudio: true,
+        playbackProgress: 0.0,
+      );
+      await speak(
+        next.text,
+        book: previousState.currentBook,
+        chapterTitle: next.title,
+        startOffset: 0,
+        chapterIndex: next.index,
+        chapterLength: next.text.length,
+        chapterQueue: previousState.chapterQueue,
+        preserveAudioSession: true,
+      );
+    } finally {
+      _autoAdvanceInProgress = false;
+    }
   }
 
   Future<void> _initialize() async {
@@ -209,13 +306,19 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   Future<void> speak(
     String text, {
     Book? book,
+    String? chapterTitle,
     int? startOffset,
     int? chapterIndex,
     int? chapterLength,
+    List<TtsChapterPayload>? chapterQueue,
+    bool preserveAudioSession = false,
+    bool continuousChapterQueue = false,
   }) async {
     _trace(
       'speak: textLength=${text.length}, selectedVoice=${state.selectedVoice}',
     );
+    _suppressAutoAdvanceOnce = false;
+    _serviceHandlesChapterQueue = continuousChapterQueue;
     state = state.copyWith(
       isSpeaking: false,
       isPaused: false,
@@ -227,10 +330,29 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       currentChapterIndex: chapterIndex,
       currentChapterLength: chapterLength,
       clearCurrentSegmentOffsets: true,
+      chapterQueue: chapterQueue,
     );
     try {
+      _ttsService.setMediaContext(
+        book == null
+            ? null
+            : TtsMediaContext(
+                id: book.id,
+                title: book.title,
+                author: book.author,
+                coverPath: book.coverPath,
+                chapterTitle: chapterTitle,
+              ),
+      );
       await _ttsService.setVoice(state.selectedVoice);
-      await _ttsService.speak(text);
+      await _ttsService.speak(
+        text,
+        preserveAudioSession: preserveAudioSession,
+        chapterQueue: chapterQueue ?? const <TtsChapterPayload>[],
+        currentChapterIndex: chapterIndex,
+        currentChapterLength: chapterLength,
+        continuousChapterQueue: continuousChapterQueue,
+      );
       state = state.copyWith(
         isSpeaking: true,
         currentText: text,
@@ -242,8 +364,11 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         playbackProgress: 0.0,
         isPaused: false,
         isLoadingAudio: false,
+        chapterQueue: chapterQueue,
       );
     } catch (e) {
+      _serviceHandlesChapterQueue = false;
+      _ttsService.setMediaContext(null);
       state = state.copyWith(
         isSpeaking: false,
         isLoadingAudio: false,
@@ -256,7 +381,10 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   Future<void> stop() async {
     try {
       _trace('stop');
+      _suppressAutoAdvanceOnce = true;
+      _serviceHandlesChapterQueue = false;
       await _ttsService.stop();
+      _ttsService.setMediaContext(null);
       state = state.copyWith(
         isSpeaking: false,
         isPaused: false,
@@ -268,6 +396,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         clearCurrentSegmentOffsets: true,
         playbackProgress: 0.0,
         isLoadingAudio: false,
+        clearChapterQueue: true,
       );
     } catch (e) {
       // Handle error
@@ -308,8 +437,21 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     }
   }
 
+  String? _chapterTextFromQueue(int chapterIndex) {
+    for (final chapter in state.chapterQueue) {
+      if (chapter.index == chapterIndex) {
+        return chapter.text;
+      }
+    }
+    return null;
+  }
+
   void setAudiobookUiVisible(bool isVisible) {
     state = state.copyWith(isAudiobookUiVisible: isVisible);
+  }
+
+  void setUiHandlesChapterAdvance(bool enabled) {
+    _uiHandlesChapterAdvance = enabled;
   }
 
   Future<void> setSpeechRate(double rate) async {

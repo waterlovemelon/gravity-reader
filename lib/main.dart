@@ -1,10 +1,23 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/presentation/pages/main_navigation_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb &&
+      (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.myreader.audio.playback',
+      androidNotificationChannelName: 'Audiobook Playback',
+      androidNotificationOngoing: true,
+    );
+  }
   runApp(const ProviderScope(child: MyReaderApp()));
 }
 

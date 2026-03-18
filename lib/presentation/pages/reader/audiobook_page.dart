@@ -5,6 +5,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
@@ -149,6 +150,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       ref.read(ttsProvider.notifier).setAudiobookUiVisible(true);
+      ref.read(ttsProvider.notifier).setUiHandlesChapterAdvance(true);
       await ref
           .read(ttsProvider.notifier)
           .selectVoiceForBook(widget.book, sampleText: _initialPlaybackText());
@@ -182,6 +184,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     _ttsStateSubscription?.close();
     _discController.dispose();
     ref.read(ttsProvider.notifier).setAudiobookUiVisible(false);
+    ref.read(ttsProvider.notifier).setUiHandlesChapterAdvance(false);
     super.dispose();
   }
 
@@ -269,14 +272,31 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
           .speak(
             text,
             book: widget.book,
+            chapterTitle: _activeChapterTitle,
             startOffset: resolvedStartOffset,
             chapterIndex: _activeChapterIndex,
             chapterLength: _isChapterMode ? _safeChapterLength : null,
+            chapterQueue: _ttsChapterQueue(),
           );
       _startProgressTracking();
     } catch (_) {
       _showToast('播放失败，请重试');
     }
+  }
+
+  List<TtsChapterPayload> _ttsChapterQueue() {
+    if (widget.chapterQueue.isEmpty) {
+      return const <TtsChapterPayload>[];
+    }
+    return widget.chapterQueue
+        .map(
+          (item) => TtsChapterPayload(
+            title: item.title,
+            text: item.text,
+            index: item.index,
+          ),
+        )
+        .toList(growable: false);
   }
 
   Future<void> _startSpeakingFromOffset(int offset) async {

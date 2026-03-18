@@ -8,12 +8,46 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:myreader/core/constants/app_constants.dart';
+import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:path_provider/path_provider.dart';
 
 enum TtsState { playing, stopped, paused }
 
 enum _TtsEngine { none, cloud, local }
+
+class _CloudChunkPlan {
+  final String text;
+  final int chapterIndex;
+  final int chapterLength;
+  final int chapterOffsetStart;
+  final int chapterOffsetEnd;
+
+  const _CloudChunkPlan({
+    required this.text,
+    required this.chapterIndex,
+    required this.chapterLength,
+    required this.chapterOffsetStart,
+    required this.chapterOffsetEnd,
+  });
+}
+
+class TtsMediaContext {
+  final String id;
+  final String title;
+  final String? author;
+  final String? coverPath;
+  final String? chapterTitle;
+
+  const TtsMediaContext({
+    required this.id,
+    required this.title,
+    this.author,
+    this.coverPath,
+    this.chapterTitle,
+  });
+}
 
 class TtsVoice {
   final String value;
@@ -116,6 +150,10 @@ class TtsService {
   void Function(TtsState state)? _stateCallback;
   void Function(double progress)? _progressCallback;
   void Function(int? start, int? end)? _segmentCallback;
+  void Function(int chapterIndex, int chapterLength)? _chapterChangedCallback;
+  bool Function()? _completionCallback;
+  bool _ignoreNextNativeStop = false;
+  bool _isAudioSessionActive = false;
 
   TtsState _state = TtsState.stopped;
   _TtsEngine _activeEngine = _TtsEngine.none;
@@ -132,10 +170,16 @@ class TtsService {
   final List<String> _cloudTempFilePaths = <String>[];
   final Map<String, String> _cloudPrefetchCache = <String, String>{};
   final List<String> _cloudPrefetchTempFilePaths = <String>[];
-  List<String> _cloudChunks = const <String>[];
+  List<_CloudChunkPlan> _cloudChunkPlans = const <_CloudChunkPlan>[];
   List<int> _cloudChunkLengths = const <int>[];
   int _cloudQueuedCount = 0;
   bool _cloudBufferWasLow = false;
+  int _lastLoggedCloudPositionMs = -1;
+  final Set<HttpClient> _activeCloudClients = <HttpClient>{};
+  int? _lastReportedCloudChapterIndex;
+  bool _isContinuousChapterQueue = false;
+  TtsMediaContext? _mediaContext;
+  Map<int, String> _chapterTitlesByIndex = const <int, String>{};
 
   TtsService() {
     _log(
@@ -158,6 +202,7 @@ class TtsService {
         'processingState=${_player.processingState}, '
         'playing=${_player.playing}',
       );
+      _reportCloudChapterForCurrentIndex(index);
       _reportCloudSegmentForCurrentIndex(index);
     });
     _player.playbackEventStream.listen(
@@ -191,12 +236,30 @@ class TtsService {
     }
   }
 
+  Future<void> _logAudioSessionDiagnostics(String context, Object error) async {
+    try {
+      final session = await AudioSession.instance;
+      final config = session.configuration;
+      final devices = await session.getDevices();
+      _log(
+        'audio session diagnostics: context=$context, error=$error, '
+        'isConfigured=${session.isConfigured}, '
+        'configuration=${config?.toJson()}, '
+        'devices=${devices.map((d) => d.type).toList()}',
+      );
+    } catch (e) {
+      _log('audio session diagnostics failed: context=$context, error=$e');
+    }
+  }
+
   Future<void> _activateAudioSession() async {
     try {
       final session = await AudioSession.instance;
       await session.setActive(true);
+      _isAudioSessionActive = true;
       _log('audio session activated.');
     } catch (e, st) {
+      _isAudioSessionActive = false;
       _log('audio session activation failed: $e');
       developer.log(
         'TtsService audio session activation error',
@@ -204,6 +267,7 @@ class TtsService {
         error: e,
         stackTrace: st,
       );
+      await _logAudioSessionDiagnostics('activate_failed', e);
     }
   }
 
@@ -211,6 +275,7 @@ class TtsService {
     try {
       final session = await AudioSession.instance;
       await session.setActive(false);
+      _isAudioSessionActive = false;
       _log('audio session deactivated.');
     } catch (e, st) {
       _log('audio session deactivation failed: $e');
@@ -230,7 +295,18 @@ class TtsService {
   double get volume => _volume;
   String get selectedVoice => _selectedVoice;
 
-  Future<void> speak(String text) async {
+  void setMediaContext(TtsMediaContext? context) {
+    _mediaContext = context;
+  }
+
+  Future<void> speak(
+    String text, {
+    bool preserveAudioSession = false,
+    List<TtsChapterPayload> chapterQueue = const <TtsChapterPayload>[],
+    int? currentChapterIndex,
+    int? currentChapterLength,
+    bool continuousChapterQueue = false,
+  }) async {
     final trimmedText = text.trim();
     if (trimmedText.isEmpty) {
       throw ArgumentError('TTS text cannot be empty.');
@@ -238,9 +314,28 @@ class TtsService {
 
     final generation = ++_playbackGeneration;
     _currentText = trimmedText;
-    await _stopActive(notifyStopped: false);
+    final canReuseCompletedCloudSession =
+        preserveAudioSession &&
+        _activeEngine == _TtsEngine.cloud &&
+        _player.processingState == ProcessingState.completed;
+    if (canReuseCompletedCloudSession) {
+      _log(
+        'speak: reusing completed cloud session for next chapter, '
+        'index=${_player.currentIndex}, '
+        'positionMs=${_player.position.inMilliseconds}, '
+        'durationMs=${_player.duration?.inMilliseconds ?? -1}',
+      );
+      _activeEngine = _TtsEngine.none;
+      _segmentCallback?.call(null, null);
+    } else {
+      await _stopActive(
+        notifyStopped: false,
+        deactivateSession: !preserveAudioSession,
+      );
+    }
     await _activateAudioSession();
     _progressCallback?.call(0.0);
+    _isContinuousChapterQueue = continuousChapterQueue;
 
     final shouldTryCloud = _shouldTryCloud;
     _log(
@@ -252,13 +347,15 @@ class TtsService {
     if (shouldTryCloud) {
       final cloudStopwatch = Stopwatch()..start();
       try {
-        _log(
-          'cloud: attempting synthesis... timeout=${_cloudTimeout.inMilliseconds}ms',
-        );
+        _log('cloud: attempting synthesis...');
         await _speakWithCloud(
           trimmedText,
           generation: generation,
-        ).timeout(_cloudTimeout);
+          chapterQueue: chapterQueue,
+          currentChapterIndex: currentChapterIndex,
+          currentChapterLength: currentChapterLength,
+          continuousChapterQueue: continuousChapterQueue,
+        );
         cloudStopwatch.stop();
         _markCloudHealthy();
         _log(
@@ -374,7 +471,7 @@ class TtsService {
             'processingState=${_player.processingState}, '
             'playing=${_player.playing}',
           );
-          await _player.play();
+          await _playCloudWithSession();
           _log(
             'cloud: resume completed. index=${_player.currentIndex}, '
             'positionMs=${_player.position.inMilliseconds}, '
@@ -394,7 +491,7 @@ class TtsService {
           if (_player.audioSources.isNotEmpty) {
             _log('resume recovering cloud playback from existing playlist.');
             _activeEngine = _TtsEngine.cloud;
-            await _player.play();
+            await _playCloudWithSession();
             break;
           }
           if (_currentText == null || _currentText!.trim().isEmpty) {
@@ -566,8 +663,19 @@ class TtsService {
     _segmentCallback = callback;
   }
 
+  void setChapterChangedCallback(
+    void Function(int chapterIndex, int chapterLength) callback,
+  ) {
+    _chapterChangedCallback = callback;
+  }
+
+  void setCompletionCallback(bool Function() callback) {
+    _completionCallback = callback;
+  }
+
   Future<void> dispose() async {
     _fallbackProgressTimer?.cancel();
+    _cancelActiveCloudRequests();
     await _playerStateSubscription?.cancel();
     await _playerPositionSubscription?.cancel();
     await _playerIndexSubscription?.cancel();
@@ -592,8 +700,8 @@ class TtsService {
 
     if (playerState.processingState == ProcessingState.completed) {
       final currentIndex = _player.currentIndex ?? 0;
-      final hasFetchedAllChunks = _cloudQueuedCount >= _cloudChunks.length;
-      final isPlayingLastChunk = currentIndex >= _cloudChunks.length - 1;
+      final hasFetchedAllChunks = _cloudQueuedCount >= _cloudChunkPlans.length;
+      final isPlayingLastChunk = currentIndex >= _cloudChunkPlans.length - 1;
 
       _log(
         'cloud: completed reached, '
@@ -609,11 +717,20 @@ class TtsService {
       // Only stop if we've fetched all chunks AND playing the last chunk
       if (hasFetchedAllChunks && isPlayingLastChunk) {
         _log('cloud: all chunks played, dispatching stopped.');
+        final keepSessionActive = _isContinuousChapterQueue
+            ? false
+            : _completionCallback?.call() == true;
         _setState(TtsState.stopped);
         _resetCloudQueueState();
         unawaited(_cleanupCloudTempFiles());
         _currentText = null;
         _stopProgressTracking(resetProgress: true);
+        if (keepSessionActive) {
+          _log(
+            'cloud: completion handed off to next chapter, skipping immediate stopActive.',
+          );
+          return;
+        }
         unawaited(_stopActive(notifyStopped: false));
         return;
       }
@@ -671,15 +788,116 @@ class TtsService {
         _setState(TtsState.paused);
         break;
       case 'stopped':
+        if (_ignoreNextNativeStop) {
+          _ignoreNextNativeStop = false;
+          return;
+        }
+        final keepSessionActive =
+            _state == TtsState.playing && _completionCallback?.call() == true;
         _resetCloudQueueState();
         _segmentCallback?.call(null, null);
         unawaited(_cleanupCloudTempFiles());
         _currentText = null;
         _stopProgressTracking(resetProgress: true);
         _setState(TtsState.stopped);
+        if (keepSessionActive) {
+          _log(
+            'local: completion handed off to next chapter, skipping immediate stopActive.',
+          );
+          break;
+        }
         unawaited(_stopActive(notifyStopped: false));
         break;
     }
+  }
+
+  Future<bool> _playCloudWithSession() async {
+    await _activateAudioSession();
+    try {
+      final playFuture = _player.play();
+      unawaited(
+        playFuture.catchError((Object error, StackTrace stackTrace) async {
+          _log('cloud: play future failed. error=$error');
+          await _logAudioSessionDiagnostics('play_future_failed', error);
+        }),
+      );
+      return await _waitForCloudPlaybackStart();
+    } catch (e) {
+      _log('cloud: play failed, retrying after session activate. error=$e');
+      await _logAudioSessionDiagnostics('play_failed', e);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await _activateAudioSession();
+      try {
+        final playFuture = _player.play();
+        unawaited(
+          playFuture.catchError((Object error, StackTrace stackTrace) async {
+            _log('cloud: play future retry failed. error=$error');
+            await _logAudioSessionDiagnostics(
+              'play_future_retry_failed',
+              error,
+            );
+          }),
+        );
+        return await _waitForCloudPlaybackStart();
+      } catch (retryError) {
+        _log('cloud: play retry failed. error=$retryError');
+        await _logAudioSessionDiagnostics('play_retry_failed', retryError);
+        return false;
+      }
+    }
+  }
+
+  Future<bool> _waitForCloudPlaybackStart() async {
+    if (_player.position.inMilliseconds > 0) {
+      _log(
+        'cloud: playback already advancing. '
+        'positionMs=${_player.position.inMilliseconds}, '
+        'processingState=${_player.processingState}, '
+        'playing=${_player.playing}',
+      );
+      return true;
+    }
+
+    final completer = Completer<bool>();
+    StreamSubscription<Duration>? positionSubscription;
+    StreamSubscription<PlayerState>? stateSubscription;
+    Timer? timeoutTimer;
+
+    void complete(bool value, String reason) {
+      if (completer.isCompleted) {
+        return;
+      }
+      _log(
+        'cloud: playback start wait completed. '
+        'success=$value, reason=$reason, '
+        'positionMs=${_player.position.inMilliseconds}, '
+        'processingState=${_player.processingState}, '
+        'playing=${_player.playing}',
+      );
+      completer.complete(value);
+    }
+
+    positionSubscription = _player.positionStream.listen((position) {
+      if (position.inMilliseconds > 0) {
+        complete(true, 'position_advanced');
+      }
+    });
+
+    stateSubscription = _player.playerStateStream.listen((playerState) {
+      if (playerState.processingState == ProcessingState.completed) {
+        complete(false, 'completed_before_progress');
+      }
+    });
+
+    timeoutTimer = Timer(const Duration(seconds: 8), () {
+      complete(false, 'start_timeout');
+    });
+
+    final started = await completer.future;
+    await positionSubscription.cancel();
+    await stateSubscription.cancel();
+    timeoutTimer.cancel();
+    return started;
   }
 
   void _setState(TtsState nextState) {
@@ -777,6 +995,18 @@ class TtsService {
     if (!_player.playing) {
       return;
     }
+    final positionMs = position.inMilliseconds;
+    if (positionMs > 0 &&
+        (_lastLoggedCloudPositionMs < 0 ||
+            positionMs - _lastLoggedCloudPositionMs >= 3000)) {
+      _lastLoggedCloudPositionMs = positionMs;
+      _log(
+        'cloud progress: positionMs=$positionMs, '
+        'durationMs=${_player.duration?.inMilliseconds ?? -1}, '
+        'index=${_player.currentIndex}, '
+        'processingState=${_player.processingState}',
+      );
+    }
     _reportProgress(_cloudPlaybackProgress(position), isActual: true);
   }
 
@@ -815,9 +1045,32 @@ class TtsService {
     return (progressedChars / totalChars).clamp(0.0, 1.0);
   }
 
-  Future<void> _speakWithCloud(String text, {required int generation}) async {
+  Future<void> _speakWithCloud(
+    String text, {
+    required int generation,
+    required List<TtsChapterPayload> chapterQueue,
+    required int? currentChapterIndex,
+    required int? currentChapterLength,
+    required bool continuousChapterQueue,
+  }) async {
     final requestStopwatch = Stopwatch()..start();
-    final chunks = _chunkTextForCloud(text);
+    final chunkPlans = _buildCloudChunkPlans(
+      text,
+      chapterQueue: chapterQueue,
+      currentChapterIndex: currentChapterIndex,
+      currentChapterLength: currentChapterLength,
+      continuousChapterQueue: continuousChapterQueue,
+    );
+    _cloudChunkPlans = List<_CloudChunkPlan>.unmodifiable(chunkPlans);
+    _cloudChunkLengths = List<int>.unmodifiable(
+      chunkPlans.map((chunk) => chunk.text.length),
+    );
+    _chapterTitlesByIndex = <int, String>{
+      if (currentChapterIndex != null)
+        currentChapterIndex: _mediaContext?.chapterTitle?.trim() ?? '',
+      for (final chapter in chapterQueue) chapter.index: chapter.title.trim(),
+    };
+    final chunks = chunkPlans.map((plan) => plan.text).toList(growable: false);
     _log(
       'cloud request: totalTextLength=${text.length}, '
       'chunkCount=${chunks.length}, '
@@ -851,13 +1104,10 @@ class TtsService {
     if (!_isPlaybackGenerationActive(generation)) {
       throw StateError('Cloud playback superseded before start.');
     }
-    _cloudChunks = List<String>.unmodifiable(chunks);
-    _cloudChunkLengths = List<int>.unmodifiable(
-      chunks.map((chunk) => chunk.length),
-    );
     _cloudQueuedCount = 1;
     _activeEngine = _TtsEngine.cloud;
     _progressCallback?.call(0.0);
+    _reportCloudChapterForCurrentIndex(0);
     _reportCloudSegmentForCurrentIndex(0);
     await _primeCloudQueueBeforePlayback(
       headers: headers,
@@ -877,22 +1127,25 @@ class TtsService {
     _log('cloud: start playback...');
     _beginProgressTracking(text);
     _setState(TtsState.playing);
-    unawaited(_player.play());
+    final started = await _playCloudWithSession();
+    if (!started) {
+      throw TimeoutException('Cloud playback did not advance position.');
+    }
   }
 
   Future<void> _primeCloudQueueBeforePlayback({
     required Map<String, String>? headers,
     required int generation,
   }) async {
-    if (_cloudQueuedCount >= _cloudChunks.length) {
+    if (_cloudQueuedCount >= _cloudChunkPlans.length) {
       return;
     }
 
     const minQueuedCountBeforePlay = 2;
-    const minBufferedCharsBeforePlay = 50;
+    const minBufferedCharsBeforePlay = 70;
     final targetQueuedCount = math.min(
       minQueuedCountBeforePlay,
-      _cloudChunks.length,
+      _cloudChunkPlans.length,
     );
 
     while (_isPlaybackGenerationActive(generation) &&
@@ -900,11 +1153,11 @@ class TtsService {
         (_cloudQueuedCount < targetQueuedCount ||
             _bufferedCloudChars() < minBufferedCharsBeforePlay)) {
       final chunkIndex = _cloudQueuedCount;
-      if (chunkIndex >= _cloudChunks.length) {
+      if (chunkIndex >= _cloudChunkPlans.length) {
         return;
       }
-      final totalChunks = _cloudChunks.length;
-      final chunk = _cloudChunks[chunkIndex];
+      final totalChunks = _cloudChunkPlans.length;
+      final chunk = _cloudChunkPlans[chunkIndex].text;
       _log(
         'cloud prime: fetch chunk ${chunkIndex + 1}/$totalChunks, '
         'bufferedCharsBefore=${_bufferedCloudChars()}, '
@@ -958,20 +1211,21 @@ class TtsService {
     required int generation,
   }) async {
     const minQueuedCount = 2;
-    const minBufferedChars = 50;
-    const targetBufferedChars = 100;
+    const minBufferedChars = 70;
+    const targetBufferedChars = 120;
     while (_isPlaybackGenerationActive(generation) &&
         _activeEngine == _TtsEngine.cloud) {
       final bufferedChars = _bufferedCloudChars();
-      if (_cloudQueuedCount >= _cloudChunks.length) {
+      if (_cloudQueuedCount >= _cloudChunkPlans.length) {
         _log(
           'cloud buffer: queue complete, '
           'bufferedChars=$bufferedChars, '
-          'queued=$_cloudQueuedCount/${_cloudChunks.length}',
+          'queued=$_cloudQueuedCount/${_cloudChunkPlans.length}',
         );
         return;
       }
-      if (_cloudQueuedCount >= math.min(minQueuedCount, _cloudChunks.length) &&
+      if (_cloudQueuedCount >=
+              math.min(minQueuedCount, _cloudChunkPlans.length) &&
           bufferedChars >= minBufferedChars) {
         _cloudBufferWasLow = false;
         await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -981,18 +1235,19 @@ class TtsService {
       if (!_cloudBufferWasLow) {
         _log(
           'cloud buffer: low, bufferedChars=$bufferedChars, '
-          'queued=$_cloudQueuedCount/${_cloudChunks.length}, fetching more...',
+          'queued=$_cloudQueuedCount/${_cloudChunkPlans.length}, fetching more...',
         );
         _cloudBufferWasLow = true;
       }
       while (_isPlaybackGenerationActive(generation) &&
           _activeEngine == _TtsEngine.cloud &&
-          _cloudQueuedCount < _cloudChunks.length &&
-          (_cloudQueuedCount < math.min(minQueuedCount, _cloudChunks.length) ||
+          _cloudQueuedCount < _cloudChunkPlans.length &&
+          (_cloudQueuedCount <
+                  math.min(minQueuedCount, _cloudChunkPlans.length) ||
               _bufferedCloudChars() < targetBufferedChars)) {
         final chunkIndex = _cloudQueuedCount;
-        final totalChunks = _cloudChunks.length;
-        final chunk = _cloudChunks[chunkIndex];
+        final totalChunks = _cloudChunkPlans.length;
+        final chunk = _cloudChunkPlans[chunkIndex].text;
         _log(
           'cloud buffer: fetch chunk ${chunkIndex + 1}/$totalChunks, '
           'bufferedCharsBefore=${_bufferedCloudChars()}, '
@@ -1072,10 +1327,24 @@ class TtsService {
   }
 
   void _resetCloudQueueState() {
-    _cloudChunks = const <String>[];
+    _cloudChunkPlans = const <_CloudChunkPlan>[];
     _cloudChunkLengths = const <int>[];
     _cloudQueuedCount = 0;
     _cloudBufferWasLow = false;
+    _lastReportedCloudChapterIndex = null;
+    _isContinuousChapterQueue = false;
+    _chapterTitlesByIndex = const <int, String>{};
+  }
+
+  void _cancelActiveCloudRequests() {
+    if (_activeCloudClients.isEmpty) {
+      return;
+    }
+    _log('cloud: cancelling ${_activeCloudClients.length} active request(s).');
+    for (final client in _activeCloudClients.toList()) {
+      client.close(force: true);
+    }
+    _activeCloudClients.clear();
   }
 
   Future<AudioSource> _fetchCloudChunkAudioSource(
@@ -1093,7 +1362,10 @@ class TtsService {
         'cloud response: chunk ${chunkIndex + 1}/$totalChunks served from preload, '
         'file="$prefetchedPath"',
       );
-      return AudioSource.file(prefetchedPath);
+      return AudioSource.file(
+        prefetchedPath,
+        tag: _mediaItemForChunk(chunkIndex, totalChunks),
+      );
     }
     final requestStopwatch = Stopwatch()..start();
     _log(
@@ -1104,6 +1376,7 @@ class TtsService {
     );
 
     final client = HttpClient();
+    _activeCloudClients.add(client);
     try {
       final request = await client.getUrl(uri);
       if (headers != null) {
@@ -1145,8 +1418,14 @@ class TtsService {
         'bufferedChars=${_bufferedCloudChars()}, '
         'file="${file.path}"',
       );
-      return AudioSource.file(file.path);
+      return AudioSource.file(
+        file.path,
+        tag: _mediaItemForChunk(chunkIndex, totalChunks),
+      );
+    } on Object {
+      rethrow;
     } finally {
+      _activeCloudClients.remove(client);
       client.close(force: true);
     }
   }
@@ -1169,12 +1448,57 @@ class TtsService {
     _setState(TtsState.playing);
   }
 
-  Future<void> _stopActive({required bool notifyStopped}) async {
+  MediaItem _mediaItemForChunk(int chunkIndex, int totalChunks) {
+    final context = _mediaContext;
+    final title = context?.title.trim();
+    final plan = (chunkIndex >= 0 && chunkIndex < _cloudChunkPlans.length)
+        ? _cloudChunkPlans[chunkIndex]
+        : null;
+    final chapterTitle =
+        _chapterTitlesByIndex[plan?.chapterIndex]?.trim() ??
+        context?.chapterTitle?.trim();
+    final author = context?.author?.trim();
+    final artUri = _artUriFromCoverPath(context?.coverPath);
+    final chunkLabel = totalChunks > 1 ? '片段 ${chunkIndex + 1}/$totalChunks' : null;
+    final subtitleParts = <String>[
+      if (chapterTitle != null && chapterTitle.isNotEmpty) chapterTitle,
+      if (chunkLabel != null) chunkLabel,
+    ];
+
+    return MediaItem(
+      id: '${context?.id ?? 'tts'}:$chunkIndex',
+      title: (title != null && title.isNotEmpty) ? title : 'Gravity Reader',
+      album: (author != null && author.isNotEmpty) ? author : null,
+      artist: subtitleParts.isEmpty ? null : subtitleParts.join(' • '),
+      artUri: artUri,
+      displayTitle: (title != null && title.isNotEmpty) ? title : 'Gravity Reader',
+      displaySubtitle: subtitleParts.isEmpty ? author : subtitleParts.join(' • '),
+      displayDescription: (author != null && author.isNotEmpty) ? author : null,
+    );
+  }
+
+  Uri? _artUriFromCoverPath(String? coverPath) {
+    final trimmed = coverPath?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return Uri.tryParse(trimmed);
+    }
+    return Uri.file(trimmed);
+  }
+
+  Future<void> _stopActive({
+    required bool notifyStopped,
+    bool deactivateSession = true,
+  }) async {
     final previousEngine = _activeEngine;
     _log(
       'stopActive: activeEngine=$previousEngine, notifyStopped=$notifyStopped',
     );
     _activeEngine = _TtsEngine.none;
+    _ignoreNextNativeStop = true;
+    _cancelActiveCloudRequests();
     Object? stopError;
     try {
       await _player.stop();
@@ -1204,25 +1528,47 @@ class TtsService {
       _setState(TtsState.stopped);
     }
     _segmentCallback?.call(null, null);
-    await _deactivateAudioSession();
+    if (deactivateSession) {
+      await _deactivateAudioSession();
+    }
     if (stopError != null) {
       throw stopError;
     }
   }
 
   void _reportCloudSegmentForCurrentIndex(int? index) {
-    if (_activeEngine != _TtsEngine.cloud || _cloudChunkLengths.isEmpty) {
+    if (_activeEngine != _TtsEngine.cloud || _cloudChunkPlans.isEmpty) {
       _segmentCallback?.call(null, null);
       return;
     }
 
-    final safeIndex = (index ?? 0).clamp(0, _cloudChunkLengths.length - 1);
-    var start = 0;
-    for (var i = 0; i < safeIndex; i++) {
-      start += _cloudChunkLengths[i];
+    final safeIndex = (index ?? 0).clamp(0, _cloudChunkPlans.length - 1);
+    final chunkPlan = _cloudChunkPlans[safeIndex];
+    _segmentCallback?.call(
+      chunkPlan.chapterOffsetStart,
+      chunkPlan.chapterOffsetEnd,
+    );
+  }
+
+  void _reportCloudChapterForCurrentIndex(int? index) {
+    if (_activeEngine != _TtsEngine.cloud || _cloudChunkPlans.isEmpty) {
+      return;
     }
-    final end = start + _cloudChunkLengths[safeIndex];
-    _segmentCallback?.call(start, end);
+
+    final safeIndex = (index ?? 0).clamp(0, _cloudChunkPlans.length - 1);
+    final chunkPlan = _cloudChunkPlans[safeIndex];
+    if (_lastReportedCloudChapterIndex == chunkPlan.chapterIndex) {
+      return;
+    }
+    _lastReportedCloudChapterIndex = chunkPlan.chapterIndex;
+    _log(
+      'cloud chapter changed: chapter=${chunkPlan.chapterIndex}, '
+      'chunkIndex=$safeIndex, chapterLength=${chunkPlan.chapterLength}',
+    );
+    _chapterChangedCallback?.call(
+      chunkPlan.chapterIndex,
+      chunkPlan.chapterLength,
+    );
   }
 
   bool get _shouldTryCloud {
@@ -1319,6 +1665,69 @@ class TtsService {
     return _groupAtomicChunksForCloud(atomicChunks);
   }
 
+  List<_CloudChunkPlan> _buildCloudChunkPlans(
+    String text, {
+    required List<TtsChapterPayload> chapterQueue,
+    required int? currentChapterIndex,
+    required int? currentChapterLength,
+    required bool continuousChapterQueue,
+  }) {
+    final plans = <_CloudChunkPlan>[];
+
+    void appendChapter({
+      required String chapterText,
+      required int chapterIndex,
+      required int chapterLength,
+    }) {
+      var offset = 0;
+      for (final chunk in _chunkTextForCloud(chapterText)) {
+        final start = offset;
+        final end = start + chunk.length;
+        plans.add(
+          _CloudChunkPlan(
+            text: chunk,
+            chapterIndex: chapterIndex,
+            chapterLength: chapterLength,
+            chapterOffsetStart: start,
+            chapterOffsetEnd: end,
+          ),
+        );
+        offset = end;
+      }
+    }
+
+    appendChapter(
+      chapterText: text,
+      chapterIndex: currentChapterIndex ?? -1,
+      chapterLength: currentChapterLength ?? text.length,
+    );
+
+    if (!continuousChapterQueue || currentChapterIndex == null) {
+      return plans;
+    }
+
+    final currentQueuePos = chapterQueue.indexWhere(
+      (item) => item.index == currentChapterIndex,
+    );
+    if (currentQueuePos < 0) {
+      return plans;
+    }
+
+    for (var i = currentQueuePos + 1; i < chapterQueue.length; i++) {
+      final chapter = chapterQueue[i];
+      if (chapter.text.trim().isEmpty) {
+        continue;
+      }
+      appendChapter(
+        chapterText: chapter.text,
+        chapterIndex: chapter.index,
+        chapterLength: chapter.text.length,
+      );
+    }
+
+    return plans;
+  }
+
   List<String> _splitTextByPunctuation(String text) {
     const separators = <String>[
       '。',
@@ -1361,10 +1770,10 @@ class TtsService {
       return const <String>[];
     }
 
-    const minFirstChunkChars = 32;
-    const targetFirstChunkChars = 64;
-    const targetNormalChunkChars = 90;
-    const maxNormalChunkChars = 120;
+    const minFirstChunkChars = 24;
+    const targetFirstChunkChars = 48;
+    const targetNormalChunkChars = 56;
+    const maxNormalChunkChars = 72;
 
     final grouped = <String>[];
     final buffer = StringBuffer();
