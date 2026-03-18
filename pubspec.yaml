@@ -24,18 +24,11 @@ dependencies:
   # Shared Preferences  
   shared_preferences: ^2.2.0
   
-  # Image Picker & Compression
-  image_picker: ^1.0.7
-  flutter_image_compress: ^2.3.0
-  
   # File Picker for iOS and Android
   file_picker: ^10.3.10
-  
-  # Utilities
+  image_picker: ^1.0.0
   intl: ^0.19.0
   charset_converter: ^2.3.0
-  
-  # Audio
   just_audio: ^0.10.4
   audio_session: ^0.2.1
   just_audio_background: ^0.0.1-beta.17
@@ -54,6 +47,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
-  assets:
-    - assets/backgrounds/
