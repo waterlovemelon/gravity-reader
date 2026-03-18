@@ -149,6 +149,7 @@ class TtsService {
   final Stopwatch _playbackStopwatch = Stopwatch();
   void Function(TtsState state)? _stateCallback;
   void Function(double progress)? _progressCallback;
+  void Function(int? offset)? _playbackOffsetCallback;
   void Function(int? start, int? end)? _segmentCallback;
   void Function(int chapterIndex, int chapterLength)? _chapterChangedCallback;
   bool Function()? _completionCallback;
@@ -659,6 +660,10 @@ class TtsService {
     _progressCallback = callback;
   }
 
+  void setPlaybackOffsetCallback(void Function(int? offset) callback) {
+    _playbackOffsetCallback = callback;
+  }
+
   void setSegmentCallback(void Function(int? start, int? end) callback) {
     _segmentCallback = callback;
   }
@@ -731,7 +736,9 @@ class TtsService {
           );
           return;
         }
-        unawaited(_stopActive(notifyStopped: false));
+        // Playback is already completed; issuing another async stop can race
+        // with the next chapter start and wipe freshly prepared chunk state.
+        unawaited(_deactivateAudioSession());
         return;
       }
 
@@ -772,7 +779,9 @@ class TtsService {
         final position = (args['position'] as num?)?.toDouble() ?? 0.0;
         final total = (args['total'] as num?)?.toDouble() ?? 0.0;
         if (total > 0) {
-          _reportProgress((position / total).clamp(0.0, 1.0), isActual: true);
+          final progress = (position / total).clamp(0.0, 1.0);
+          _reportProgress(progress, isActual: true);
+          _reportPlaybackOffset(_localPlaybackOffsetForProgress(progress));
         }
       }
       return;
@@ -806,7 +815,9 @@ class TtsService {
           );
           break;
         }
-        unawaited(_stopActive(notifyStopped: false));
+        // Native side is already stopped here; avoid duplicate async stop to
+        // prevent racing with a newly started chapter.
+        unawaited(_deactivateAudioSession());
         break;
     }
   }
@@ -964,6 +975,7 @@ class TtsService {
     _lastActualProgressAt = null;
     _estimatedDurationMs = 0;
     _lastProgressValue = 0.0;
+    _reportPlaybackOffset(null);
     if (resetProgress) {
       _progressCallback?.call(0.0);
     }
@@ -978,13 +990,23 @@ class TtsService {
       _lastActualProgressAt = DateTime.now();
     }
     _lastProgressValue = safeProgress;
+    if (_activeEngine != _TtsEngine.cloud) {
+      _reportPlaybackOffset(_localPlaybackOffsetForProgress(safeProgress));
+    }
     _progressCallback?.call(safeProgress);
   }
 
   int _estimateDurationMs(String text) {
-    final normalizedLength = math.max(1, text.trim().length);
-    final charsPerSecond = 6.0 * _speechRate.clamp(0.5, 2.0);
-    final seconds = (normalizedLength / charsPerSecond).clamp(8.0, 4 * 60 * 60);
+    final normalizedText = text.trim();
+    final baseLength = math.max(1, normalizedText.length);
+    final punctuationPauses = RegExp(r'[，。！？；：,.!?;:\n]')
+        .allMatches(normalizedText)
+        .length;
+    // A rougher but more conservative estimate for Mandarin/English mixed TTS.
+    // Add punctuation pause weight so fallback progress does not advance too fast.
+    final weightedLength = baseLength + punctuationPauses * 2;
+    final charsPerSecond = 3.2 * _speechRate.clamp(0.5, 2.0);
+    final seconds = (weightedLength / charsPerSecond).clamp(8.0, 4 * 60 * 60);
     return (seconds * 1000).round();
   }
 
@@ -1008,6 +1030,7 @@ class TtsService {
       );
     }
     _reportProgress(_cloudPlaybackProgress(position), isActual: true);
+    _reportPlaybackOffset(_cloudPlaybackOffset(position));
   }
 
   double _cloudPlaybackProgress(Duration position) {
@@ -1045,6 +1068,46 @@ class TtsService {
     return (progressedChars / totalChars).clamp(0.0, 1.0);
   }
 
+  int? _cloudPlaybackOffset(Duration position) {
+    if (_cloudChunkPlans.isEmpty) {
+      return _localPlaybackOffsetForProgress(_cloudPlaybackProgress(position));
+    }
+    final currentIndex = (_player.currentIndex ?? 0).clamp(
+      0,
+      _cloudChunkPlans.length - 1,
+    );
+    final chunkPlan = _cloudChunkPlans[currentIndex];
+    final chunkLength = math.max(
+      1,
+      chunkPlan.chapterOffsetEnd - chunkPlan.chapterOffsetStart,
+    );
+    final currentDurationMs = _player.duration?.inMilliseconds ?? 0;
+    final currentChunkProgress = currentDurationMs > 0
+        ? (position.inMilliseconds / currentDurationMs).clamp(0.0, 1.0)
+        : 0.0;
+    final chunkOffset =
+        (chunkLength * currentChunkProgress).round().clamp(0, chunkLength);
+    return (chunkPlan.chapterOffsetStart + chunkOffset).clamp(
+      0,
+      math.max(0, chunkPlan.chapterLength - 1),
+    );
+  }
+
+  int? _localPlaybackOffsetForProgress(double progress) {
+    final currentTextLength = _currentText?.length ?? 0;
+    if (currentTextLength <= 0) {
+      return null;
+    }
+    return (currentTextLength * progress.clamp(0.0, 1.0)).round().clamp(
+      0,
+      math.max(0, currentTextLength - 1),
+    );
+  }
+
+  void _reportPlaybackOffset(int? offset) {
+    _playbackOffsetCallback?.call(offset);
+  }
+
   Future<void> _speakWithCloud(
     String text, {
     required int generation,
@@ -1054,6 +1117,12 @@ class TtsService {
     required bool continuousChapterQueue,
   }) async {
     final requestStopwatch = Stopwatch()..start();
+    _log('cloud: stopping native engine...');
+    await _channel.invokeMethod('stop');
+    _log('cloud: stopping audio player...');
+    await _player.stop();
+    _resetCloudQueueState();
+
     final chunkPlans = _buildCloudChunkPlans(
       text,
       chapterQueue: chapterQueue,
@@ -1082,11 +1151,6 @@ class TtsService {
       'text="${text.replaceAll('"', r'\"')}"',
     );
 
-    _log('cloud: stopping native engine...');
-    await _channel.invokeMethod('stop');
-    _log('cloud: stopping audio player...');
-    await _player.stop();
-    _resetCloudQueueState();
     _log('cloud: setting volume=${_volume.toStringAsFixed(2)}');
     await _player.setVolume(_volume);
 

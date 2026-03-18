@@ -19,6 +19,7 @@ class TtsAppState {
   final int? currentStartOffset;
   final int? currentChapterIndex;
   final int? currentChapterLength;
+  final int? currentPlaybackOffset;
   final int? currentSegmentStartOffset;
   final int? currentSegmentEndOffset;
   final double playbackProgress;
@@ -40,6 +41,7 @@ class TtsAppState {
     this.currentStartOffset,
     this.currentChapterIndex,
     this.currentChapterLength,
+    this.currentPlaybackOffset,
     this.currentSegmentStartOffset,
     this.currentSegmentEndOffset,
     this.playbackProgress = 0.0,
@@ -67,6 +69,8 @@ class TtsAppState {
     bool clearCurrentChapterIndex = false,
     int? currentChapterLength,
     bool clearCurrentChapterLength = false,
+    int? currentPlaybackOffset,
+    bool clearCurrentPlaybackOffset = false,
     int? currentSegmentStartOffset,
     int? currentSegmentEndOffset,
     bool clearCurrentSegmentOffsets = false,
@@ -96,6 +100,9 @@ class TtsAppState {
       currentChapterLength: clearCurrentChapterLength
           ? null
           : (currentChapterLength ?? this.currentChapterLength),
+      currentPlaybackOffset: clearCurrentPlaybackOffset
+          ? null
+          : (currentPlaybackOffset ?? this.currentPlaybackOffset),
       currentSegmentStartOffset: clearCurrentSegmentOffsets
           ? null
           : (currentSegmentStartOffset ?? this.currentSegmentStartOffset),
@@ -173,6 +180,12 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     _ttsService.setProgressCallback((progress) {
       state = state.copyWith(playbackProgress: progress.clamp(0.0, 1.0));
     });
+    _ttsService.setPlaybackOffsetCallback((offset) {
+      final baseOffset = state.currentStartOffset ?? 0;
+      state = state.copyWith(
+        currentPlaybackOffset: offset == null ? null : baseOffset + offset,
+      );
+    });
     _ttsService.setChapterChangedCallback((chapterIndex, chapterLength) {
       final currentIndex = state.currentChapterIndex;
       final didChapterChange =
@@ -185,6 +198,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         currentChapterLength: chapterLength,
         currentStartOffset: didChapterChange ? 0 : state.currentStartOffset,
         currentText: nextText,
+        currentPlaybackOffset: didChapterChange ? 0 : state.currentPlaybackOffset,
         clearCurrentSegmentOffsets: didChapterChange,
         playbackProgress: didChapterChange ? 0.0 : state.playbackProgress,
       );
@@ -329,6 +343,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       currentStartOffset: startOffset,
       currentChapterIndex: chapterIndex,
       currentChapterLength: chapterLength,
+      currentPlaybackOffset: startOffset,
       clearCurrentSegmentOffsets: true,
       chapterQueue: chapterQueue,
     );
@@ -360,6 +375,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         currentStartOffset: startOffset,
         currentChapterIndex: chapterIndex,
         currentChapterLength: chapterLength,
+        currentPlaybackOffset: startOffset,
         clearCurrentSegmentOffsets: true,
         playbackProgress: 0.0,
         isPaused: false,
@@ -393,6 +409,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         clearCurrentStartOffset: true,
         clearCurrentChapterIndex: true,
         clearCurrentChapterLength: true,
+        clearCurrentPlaybackOffset: true,
         clearCurrentSegmentOffsets: true,
         playbackProgress: 0.0,
         isLoadingAudio: false,

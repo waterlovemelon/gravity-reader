@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:charset_converter/charset_converter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,6 +43,70 @@ class _TxtPage {
     required this.startOffset,
     required this.endOffset,
   });
+}
+
+@immutable
+class TxtEdgePagingResolution {
+  final double overscroll;
+  final bool triggerLatched;
+  final bool shouldPage;
+  final bool previous;
+
+  const TxtEdgePagingResolution({
+    required this.overscroll,
+    required this.triggerLatched,
+    required this.shouldPage,
+    required this.previous,
+  });
+}
+
+@visibleForTesting
+TxtEdgePagingResolution resolveTxtEdgeOverscroll({
+  required double accumulatedOverscroll,
+  required bool triggerLatched,
+  required bool hasTxtPages,
+  required bool hasTxtChapters,
+  required int currentPage,
+  required int totalPages,
+  required double overscroll,
+  double threshold = 16,
+}) {
+  if (!hasTxtPages || !hasTxtChapters || triggerLatched) {
+    return TxtEdgePagingResolution(
+      overscroll: accumulatedOverscroll,
+      triggerLatched: triggerLatched,
+      shouldPage: false,
+      previous: false,
+    );
+  }
+
+  final atLeadingEdge = currentPage <= 0 && overscroll < 0;
+  final atTrailingEdge = currentPage >= totalPages - 1 && overscroll > 0;
+  if (!atLeadingEdge && !atTrailingEdge) {
+    return const TxtEdgePagingResolution(
+      overscroll: 0,
+      triggerLatched: false,
+      shouldPage: false,
+      previous: false,
+    );
+  }
+
+  final nextOverscroll = accumulatedOverscroll + overscroll;
+  if (nextOverscroll.abs() < threshold) {
+    return TxtEdgePagingResolution(
+      overscroll: nextOverscroll,
+      triggerLatched: false,
+      shouldPage: false,
+      previous: atLeadingEdge,
+    );
+  }
+
+  return TxtEdgePagingResolution(
+    overscroll: 0,
+    triggerLatched: true,
+    shouldPage: true,
+    previous: atLeadingEdge,
+  );
 }
 
 class _TocEntry {
@@ -417,6 +482,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _isUserPaging = false;
   Completer<void>? _pagingIdleCompleter;
   int? _lastPageTurnStart; // 用于追踪翻页延迟
+  double _txtEdgeOverscroll = 0;
+  bool _txtEdgePagingTriggered = false;
 
   Timer? _progressSaveDebounce;
   Timer? _repaginateDebounce;
@@ -598,27 +665,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         // 只处理点击，不参与拖动手势竞技，避免干扰 PageView 的滑动
         RawGestureDetector(
           gestures: <Type, GestureRecognizerFactory>{
-            TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-              () => TapGestureRecognizer(),
-              (TapGestureRecognizer instance) {
-                instance.onTapUp = (details) {
-                  _handleTap(details, totalPages);
-                };
-              },
-            ),
+            TapGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+                  () => TapGestureRecognizer(),
+                  (TapGestureRecognizer instance) {
+                    instance.onTapUp = (details) {
+                      _handleTap(details, totalPages);
+                    };
+                  },
+                ),
           },
           behavior: HitTestBehavior.translucent,
           child: Stack(
             children: [
               NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  if (notification is ScrollStartNotification) {
-                    _setUserPaging(true);
-                  } else if (notification is ScrollEndNotification) {
-                    _setUserPaging(false);
-                  }
-                  return false;
-                },
+                onNotification: (notification) =>
+                    _handlePageScrollNotification(notification, totalPages),
                 child: PageView.builder(
                   controller: _pageController,
                   itemCount: totalPages,
@@ -2532,7 +2594,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           .read(ttsProvider.notifier)
           .selectVoiceForBook(book, sampleText: launchData.initialText);
 
-      final textToSpeak = launchData.initialText;
+      final chapterText = launchData.chapterText;
+      final textToSpeak = (chapterText != null && chapterText.trim().isNotEmpty)
+          ? chapterText
+                .substring(
+                  launchData.initialOffset.clamp(0, chapterText.length).toInt(),
+                )
+                .trim()
+          : launchData.initialText;
 
       if (textToSpeak.trim().isEmpty) {
         return;
@@ -2753,6 +2822,55 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     print('✓ _turnPage: 准备跳转到页面 $target');
     _jumpToPage(target, tapStart: tapStart, computeStart: computeStart);
+  }
+
+  bool _handlePageScrollNotification(
+    ScrollNotification notification,
+    int totalPages,
+  ) {
+    if (notification is ScrollStartNotification) {
+      _txtEdgeOverscroll = 0;
+      _txtEdgePagingTriggered = false;
+      _setUserPaging(true);
+      return false;
+    }
+
+    if (notification is OverscrollNotification) {
+      _handleTxtOverscrollPaging(notification, totalPages);
+      return false;
+    }
+
+    if (notification is ScrollEndNotification) {
+      _txtEdgeOverscroll = 0;
+      _txtEdgePagingTriggered = false;
+      _setUserPaging(false);
+    }
+
+    return false;
+  }
+
+  void _handleTxtOverscrollPaging(
+    OverscrollNotification notification,
+    int totalPages,
+  ) {
+    if (notification.metrics.axis != Axis.horizontal) {
+      return;
+    }
+
+    final resolution = resolveTxtEdgeOverscroll(
+      accumulatedOverscroll: _txtEdgeOverscroll,
+      triggerLatched: _txtEdgePagingTriggered,
+      hasTxtPages: _txtPages.isNotEmpty,
+      hasTxtChapters: _txtChapters.isNotEmpty,
+      currentPage: _currentPage,
+      totalPages: totalPages,
+      overscroll: notification.overscroll,
+    );
+    _txtEdgeOverscroll = resolution.overscroll;
+    _txtEdgePagingTriggered = resolution.triggerLatched;
+    if (resolution.shouldPage) {
+      _handleTxtEdgePaging(previous: resolution.previous);
+    }
   }
 
   void _setUserPaging(bool paging) {
@@ -4412,10 +4530,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final trackColor = _themeIndex == 4
         ? Colors.white.withOpacity(0.14)
         : Colors.white.withOpacity(0.18);
-    final coverPath = book.coverPath;
-    final coverFile = coverPath != null && coverPath.isNotEmpty
-        ? File(coverPath)
-        : null;
+    final coverFile = _resolveCoverFile(book.coverPath);
     final hasCover = coverFile != null && coverFile.existsSync();
     final chapterProgress = _currentChapterReadingProgress(book, totalPages);
     final mediaSize = MediaQuery.of(context).size;
@@ -4622,6 +4737,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  File? _resolveCoverFile(String? rawPath) {
+    final trimmed = rawPath?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.startsWith('file://')) {
+      final uri = Uri.tryParse(trimmed);
+      if (uri == null) {
+        return null;
+      }
+      final path = uri.toFilePath();
+      return path.isEmpty ? null : File(path);
+    }
+    return File(trimmed);
+  }
+
   Offset _clampFloatingPlaybackOffset(
     Offset offset, {
     required Size screenSize,
@@ -4654,17 +4785,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   double _currentChapterReadingProgress(Book book, int totalPages) {
     final ttsState = ref.read(ttsProvider);
     final chapterLength = ttsState.currentChapterLength;
-    final chapterStartOffset = ttsState.currentStartOffset;
-    final currentText = ttsState.currentText;
+    final playbackOffset = ttsState.currentPlaybackOffset;
     if (chapterLength != null &&
         chapterLength > 0 &&
-        chapterStartOffset != null &&
-        currentText != null &&
+        playbackOffset != null &&
         (ttsState.isSpeaking || ttsState.isPaused || ttsState.isLoadingAudio)) {
-      final progressedChars = (currentText.length * ttsState.playbackProgress)
-          .round();
-      final chapterOffset = chapterStartOffset + progressedChars;
-      return (chapterOffset / chapterLength).clamp(0.0, 1.0);
+      return (playbackOffset / chapterLength).clamp(0.0, 1.0);
     }
 
     if (!_isTxtBook(book) || _txtPages.isEmpty) {

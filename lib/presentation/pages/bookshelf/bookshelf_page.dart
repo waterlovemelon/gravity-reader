@@ -263,7 +263,6 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         await coversDir.create(recursive: true);
       }
 
-      // Use the original file extension from the image path
       final imagePath = image.path;
       final fileExtension = imagePath.contains('.')
           ? imagePath.split('.').last.toLowerCase()
@@ -272,7 +271,6 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       final coverFilePath = '${coversDir.path}/$coverFileName';
       final previousCoverPath = book.coverPath;
 
-      // Convert XFile to File and copy to covers directory
       final sourceFile = File(imagePath);
       await sourceFile.copy(coverFilePath);
       if (previousCoverPath != null && previousCoverPath.isNotEmpty) {

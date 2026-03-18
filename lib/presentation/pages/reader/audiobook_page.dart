@@ -330,11 +330,11 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         return;
       }
       if (state.isSpeaking) {
-        final totalSeconds = _estimatedDurationSeconds();
-        final step = totalSeconds <= 0 ? 0.0 : 1 / totalSeconds;
         setState(() {
-          _estimatedPlaybackProgress = (_estimatedPlaybackProgress + step)
-              .clamp(0.0, 1.0);
+          // Service-side progress already includes actual player position and
+          // fallback estimation. Keep a single source of truth to avoid
+          // double-advancing UI progress.
+          _estimatedPlaybackProgress = state.playbackProgress.clamp(0.0, 1.0);
         });
         _maybePreloadNextChapter(state);
       }
@@ -722,6 +722,11 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     }
     if (_isDraggingProgress) {
       return _currentOffset;
+    }
+    final absolutePlaybackOffset = ttsState.currentPlaybackOffset;
+    if (absolutePlaybackOffset != null &&
+        (ttsState.isSpeaking || ttsState.isPaused || ttsState.isLoadingAudio)) {
+      return absolutePlaybackOffset.clamp(0, _safeChapterLength - 1);
     }
     final hasLiveProgress =
         (ttsState.isSpeaking || ttsState.isPaused) &&
@@ -1172,10 +1177,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       176.0,
       300.0,
     );
-    final coverPath = widget.book.coverPath;
-    final coverFile = coverPath != null && coverPath.isNotEmpty
-        ? File(coverPath)
-        : null;
+    final coverFile = _resolveCoverFile(widget.book.coverPath);
     final hasCover = coverFile != null && coverFile.existsSync();
 
     return SizedBox(
@@ -1240,6 +1242,22 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         ],
       ),
     );
+  }
+
+  File? _resolveCoverFile(String? rawPath) {
+    final trimmed = rawPath?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.startsWith('file://')) {
+      final uri = Uri.tryParse(trimmed);
+      if (uri == null) {
+        return null;
+      }
+      final path = uri.toFilePath();
+      return path.isEmpty ? null : File(path);
+    }
+    return File(trimmed);
   }
 
   Widget _buildCoverPlaceholder() {
