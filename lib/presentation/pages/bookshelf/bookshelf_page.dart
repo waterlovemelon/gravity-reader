@@ -295,6 +295,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       // Update book in database
       final updateBookUseCase = ref.read(updateBookUseCaseProvider);
       await updateBookUseCase(updatedBook);
+      ref.invalidate(bookByIdProvider(bookId));
+      ref.read(ttsProvider.notifier).refreshCurrentBook(updatedBook);
 
       // Reload books to refresh UI
       await ref.read(booksProvider.notifier).loadBooks();

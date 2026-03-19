@@ -4503,12 +4503,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Widget _buildPlaybackControlButton(Book book, int totalPages) {
     final ttsState = ref.watch(ttsProvider);
+    final latestBook = ref.watch(bookByIdProvider(book.id)).valueOrNull;
+    final displayBook = latestBook ?? ttsState.currentBook ?? book;
     const capsuleWidth = 164.0;
     const capsuleHeight = 59.0;
     const coverSize = 49.0;
     const ringSize = 55.0;
     const actionButtonSize = 34.0;
-    final launchData = _buildAudiobookLaunchData(book);
+    final launchData = _buildAudiobookLaunchData(displayBook);
     final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
     final isLoadingAudio =
         ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
@@ -4530,9 +4532,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final trackColor = _themeIndex == 4
         ? Colors.white.withOpacity(0.14)
         : Colors.white.withOpacity(0.18);
-    final coverFile = _resolveCoverFile(book.coverPath);
+    final coverFile = _resolveCoverFile(displayBook.coverPath);
     final hasCover = coverFile != null && coverFile.existsSync();
-    final chapterProgress = _currentChapterReadingProgress(book, totalPages);
+    final chapterProgress = _currentChapterReadingProgress(
+      displayBook,
+      totalPages,
+    );
     final mediaSize = MediaQuery.of(context).size;
     final viewPadding = MediaQuery.of(context).viewPadding;
     final defaultOffset = Offset(
@@ -4597,7 +4602,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   children: [
                     const SizedBox(width: 6),
                     GestureDetector(
-                      onTap: () async => _openAudiobookSheet(book, totalPages),
+                      onTap: () async =>
+                          _openAudiobookSheet(displayBook, totalPages),
                       child: SizedBox(
                         width: ringSize,
                         height: ringSize,
@@ -4637,11 +4643,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                             fit: BoxFit.cover,
                                             errorBuilder: (_, __, ___) =>
                                                 _buildFloatingPlaybackCoverPlaceholder(
-                                                  book,
+                                                  displayBook,
                                                 ),
                                           )
                                         : _buildFloatingPlaybackCoverPlaceholder(
-                                            book,
+                                            displayBook,
                                           ),
                                   ),
                                 ),
@@ -4662,7 +4668,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         onTap: canTapPlayback
                             ? () => unawaited(
                                 _toggleReaderPlayback(
-                                  book: book,
+                                  book: displayBook,
                                   totalPages: totalPages,
                                   ttsState: ttsState,
                                   canPlay: canPlay,

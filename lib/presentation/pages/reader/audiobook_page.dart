@@ -6,6 +6,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/models/tts_chapter_payload.dart';
+import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
@@ -1177,8 +1178,17 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       176.0,
       300.0,
     );
-    final coverFile = _resolveCoverFile(widget.book.coverPath);
+    final latestBook = ref.watch(bookByIdProvider(widget.book.id)).valueOrNull;
+    final displayBook = latestBook ?? widget.book;
+    final coverFile = _resolveCoverFile(displayBook.coverPath);
     final hasCover = coverFile != null && coverFile.existsSync();
+    final discEdge = const Color(0xFFE7E1D5);
+    final discSurface = const Color(0xFFD9D4C6);
+    final discShadow = const Color(0xFFB9B09D);
+    final ringHighlight = const Color(0xFFF9F5EE);
+    final spindleColor = const Color(0xFFFFFBF4);
+    final mintReflection = _accentGreen.withValues(alpha: 0.16);
+    final mintReflectionSoft = _accentGreen.withValues(alpha: 0.08);
 
     return SizedBox(
       width: discSize.toDouble(),
@@ -1202,40 +1212,159 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
           ),
           RotationTransition(
             turns: _discController,
-            child: Container(
+            child: SizedBox(
               width: discSize,
               height: discSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFA7F3D0), Color(0xFF6EE7B7)],
-                ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.35),
-                  width: 2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 22,
-                    offset: const Offset(0, 10),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: discSize,
+                    height: discSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.16, -0.2),
+                        radius: 1.08,
+                        colors: [ringHighlight, discSurface, discShadow],
+                        stops: const [0.0, 0.52, 1.0],
+                      ),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: discShadow.withValues(alpha: 0.28),
+                          blurRadius: 30,
+                          offset: const Offset(0, 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: discSize * 0.92,
+                    height: discSize * 0.92,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.38),
+                        width: 1,
+                      ),
+                      gradient: SweepGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.0),
+                          Colors.white.withValues(alpha: 0.32),
+                          mintReflection,
+                          Colors.white.withValues(alpha: 0.08),
+                          discShadow.withValues(alpha: 0.08),
+                          mintReflectionSoft,
+                          Colors.white.withValues(alpha: 0.0),
+                        ],
+                        stops: const [0.0, 0.14, 0.28, 0.52, 0.82, 1.0],
+                      ),
+                    ),
+                  ),
+                  for (final factor in [0.98, 0.88, 0.78, 0.68, 0.58])
+                    Container(
+                      width: discSize * factor,
+                      height: discSize * factor,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(
+                            alpha: factor > 0.9 ? 0.22 : 0.12,
+                          ),
+                          width: 0.8,
+                        ),
+                      ),
+                    ),
+                  Container(
+                    width: discSize * 0.72,
+                    height: discSize * 0.72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: 0.24),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.34),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: mintReflectionSoft,
+                          blurRadius: 14,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: discSize * 0.66,
+                    height: discSize * 0.66,
+                    padding: EdgeInsets.all(discSize * 0.055),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.14, -0.18),
+                        colors: [
+                          Colors.white.withValues(alpha: 0.26),
+                          mintReflectionSoft,
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                    child: ClipOval(
+                      child: hasCover
+                          ? Image.file(
+                              coverFile,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  _buildCoverPlaceholder(),
+                            )
+                          : _buildCoverPlaceholder(),
+                    ),
+                  ),
+                  Container(
+                    width: discSize * 0.12,
+                    height: discSize * 0.12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.16, -0.18),
+                        colors: [spindleColor, discEdge, discShadow],
+                      ),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.72),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: discShadow.withValues(alpha: 0.24),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    top: discSize * 0.1,
+                    left: discSize * 0.16,
+                    child: Container(
+                      width: discSize * 0.24,
+                      height: discSize * 0.085,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(discSize),
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0.42),
+                            mintReflectionSoft,
+                            Colors.white.withValues(alpha: 0.06),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: ClipOval(
-                  child: hasCover
-                      ? Image.file(
-                          coverFile,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              _buildCoverPlaceholder(),
-                        )
-                      : _buildCoverPlaceholder(),
-                ),
               ),
             ),
           ),
