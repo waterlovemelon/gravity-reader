@@ -44,7 +44,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接局域网内的语音合成服务，以提供听书功能。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>需要访问相册来选择书籍封面图片</string>
+	<string>需要访问相册来选择书籍封面和正文背景图片</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>需要保存封面图片到相册</string>
 	<key>NSAppTransportSecurity</key>

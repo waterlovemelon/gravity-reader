@@ -2,14 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:charset_converter/charset_converter.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
@@ -181,6 +184,10 @@ class _ThemeOption {
 }
 
 enum _ReaderPanel { none, toc, notes, progress, theme, typography }
+
+enum _ReaderBackgroundMode { preset, customImage }
+
+enum _ReaderBackgroundImageFit { cover, contain, fill }
 
 Map<String, dynamic> _prepareTxtChapterData(String text) {
   final chapters = TxtParser().parse(text).chapters;
@@ -455,6 +462,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   static const String _prefTextAlignPreset = 'reader_text_align_preset_v1';
   static const String _prefParagraphIndent = 'reader_paragraph_indent_v1';
   static const String _prefFontStylePreset = 'reader_font_style_preset_v1';
+  static const String _prefBackgroundMode = 'reader_background_mode_v1';
+  static const String _prefBackgroundPresetIndex =
+      'reader_background_preset_index_v1';
+  static const String _prefBackgroundImagePath =
+      'reader_background_image_path_v1';
+  static const String _prefBackgroundImageFit =
+      'reader_background_image_fit_v1';
+  static const String _prefBackgroundOverlayOpacity =
+      'reader_background_overlay_opacity_v1';
+  static const String _prefBackgroundBlurSigma =
+      'reader_background_blur_sigma_v1';
+  static const String _prefBackgroundBrightness =
+      'reader_background_brightness_v1';
   static const bool _enablePageCountMode = false;
   // 禁用 keepPage 以避免 page storage 延迟
   final PageController _pageController = PageController(keepPage: false);
@@ -495,6 +515,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   int _themeIndex = 2;
   int _paddingPreset = 1;
   int _lineHeightPreset = 2;
+  _ReaderBackgroundMode _backgroundMode = _ReaderBackgroundMode.preset;
+  String? _customBackgroundImagePath;
+  _ReaderBackgroundImageFit _backgroundImageFit =
+      _ReaderBackgroundImageFit.cover;
+  double _backgroundOverlayOpacity = 0.18;
+  double _backgroundBlurSigma = 0;
+  double? _customBackgroundBrightness;
+  bool _isPickingBackgroundImage = false;
   bool _autoPageEnabled = false;
   Timer? _autoPageTimer;
   bool _canStartTxtLoad = true;
@@ -572,6 +600,38 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final textAlignPreset = prefs.getInt(_prefTextAlignPreset);
     final paragraphIndent = prefs.getBool(_prefParagraphIndent);
     final fontStylePreset = prefs.getInt(_prefFontStylePreset);
+    final backgroundModeValue = prefs.getString(_prefBackgroundMode);
+    final backgroundPresetIndex = prefs.getInt(_prefBackgroundPresetIndex);
+    final backgroundImagePath = prefs.getString(_prefBackgroundImagePath);
+    final backgroundImageFitValue = prefs.getString(_prefBackgroundImageFit);
+    final backgroundOverlayOpacity = prefs.getDouble(
+      _prefBackgroundOverlayOpacity,
+    );
+    final backgroundBlurSigma = prefs.getDouble(_prefBackgroundBlurSigma);
+    var backgroundBrightness = prefs.getDouble(_prefBackgroundBrightness);
+    var resolvedBackgroundMode = _readerBackgroundModeFromValue(
+      backgroundModeValue,
+    );
+    var resolvedBackgroundImagePath = backgroundImagePath;
+
+    if (resolvedBackgroundImagePath != null &&
+        resolvedBackgroundImagePath.isNotEmpty) {
+      final exists = await File(resolvedBackgroundImagePath).exists();
+      if (!exists) {
+        resolvedBackgroundMode = _ReaderBackgroundMode.preset;
+        resolvedBackgroundImagePath = null;
+        backgroundBrightness = null;
+      } else if (backgroundBrightness == null) {
+        backgroundBrightness = await _computeImageBrightness(
+          resolvedBackgroundImagePath,
+        );
+      }
+    } else {
+      resolvedBackgroundMode = _ReaderBackgroundMode.preset;
+      resolvedBackgroundImagePath = null;
+      backgroundBrightness = null;
+    }
+
     if (!mounted) {
       return;
     }
@@ -594,7 +654,27 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       if (fontStylePreset != null) {
         _fontStylePreset = fontStylePreset.clamp(0, 2);
       }
+      if (backgroundPresetIndex != null) {
+        _themeIndex = backgroundPresetIndex.clamp(0, 4);
+      }
+      _backgroundMode = resolvedBackgroundMode;
+      _customBackgroundImagePath = resolvedBackgroundImagePath;
+      _backgroundImageFit = _readerBackgroundImageFitFromValue(
+        backgroundImageFitValue,
+      );
+      if (backgroundOverlayOpacity != null) {
+        _backgroundOverlayOpacity = backgroundOverlayOpacity.clamp(0.0, 0.6);
+      }
+      if (backgroundBlurSigma != null) {
+        _backgroundBlurSigma = backgroundBlurSigma.clamp(0.0, 12.0);
+      }
+      _customBackgroundBrightness = backgroundBrightness;
     });
+    if (resolvedBackgroundMode == _ReaderBackgroundMode.preset &&
+        backgroundImagePath != null &&
+        backgroundImagePath.isNotEmpty) {
+      _scheduleSaveReaderPreferences();
+    }
     if (_txtChapters.isNotEmpty) {
       _scheduleRepaginate(immediate: true);
     }
@@ -612,8 +692,230 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         await prefs.setInt(_prefTextAlignPreset, _textAlignPreset);
         await prefs.setBool(_prefParagraphIndent, _paragraphIndentEnabled);
         await prefs.setInt(_prefFontStylePreset, _fontStylePreset);
+        await prefs.setString(
+          _prefBackgroundMode,
+          _backgroundMode == _ReaderBackgroundMode.customImage
+              ? 'custom_image'
+              : 'preset',
+        );
+        await prefs.setInt(_prefBackgroundPresetIndex, _themeIndex);
+        if (_customBackgroundImagePath != null &&
+            _customBackgroundImagePath!.isNotEmpty) {
+          await prefs.setString(
+            _prefBackgroundImagePath,
+            _customBackgroundImagePath!,
+          );
+        } else {
+          await prefs.remove(_prefBackgroundImagePath);
+        }
+        await prefs.setString(
+          _prefBackgroundImageFit,
+          _readerBackgroundImageFitValue(_backgroundImageFit),
+        );
+        await prefs.setDouble(
+          _prefBackgroundOverlayOpacity,
+          _backgroundOverlayOpacity,
+        );
+        await prefs.setDouble(_prefBackgroundBlurSigma, _backgroundBlurSigma);
+        if (_customBackgroundBrightness != null) {
+          await prefs.setDouble(
+            _prefBackgroundBrightness,
+            _customBackgroundBrightness!,
+          );
+        } else {
+          await prefs.remove(_prefBackgroundBrightness);
+        }
       },
     );
+  }
+
+  _ReaderBackgroundMode _readerBackgroundModeFromValue(String? value) {
+    return value == 'custom_image'
+        ? _ReaderBackgroundMode.customImage
+        : _ReaderBackgroundMode.preset;
+  }
+
+  _ReaderBackgroundImageFit _readerBackgroundImageFitFromValue(String? value) {
+    switch (value) {
+      case 'contain':
+        return _ReaderBackgroundImageFit.contain;
+      case 'fill':
+        return _ReaderBackgroundImageFit.fill;
+      default:
+        return _ReaderBackgroundImageFit.cover;
+    }
+  }
+
+  String _readerBackgroundImageFitValue(_ReaderBackgroundImageFit fit) {
+    switch (fit) {
+      case _ReaderBackgroundImageFit.contain:
+        return 'contain';
+      case _ReaderBackgroundImageFit.fill:
+        return 'fill';
+      case _ReaderBackgroundImageFit.cover:
+        return 'cover';
+    }
+  }
+
+  Future<double?> _computeImageBrightness(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: 32,
+        targetHeight: 32,
+      );
+      final frame = await codec.getNextFrame();
+      final byteData = await frame.image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      if (byteData == null) {
+        return null;
+      }
+
+      final data = byteData.buffer.asUint8List();
+      if (data.isEmpty) {
+        return null;
+      }
+
+      var luminance = 0.0;
+      var pixels = 0;
+      for (var index = 0; index + 3 < data.length; index += 4) {
+        final alpha = data[index + 3] / 255.0;
+        if (alpha <= 0) {
+          continue;
+        }
+        final red = data[index] / 255.0;
+        final green = data[index + 1] / 255.0;
+        final blue = data[index + 2] / 255.0;
+        luminance += (0.2126 * red + 0.7152 * green + 0.0722 * blue) * alpha;
+        pixels++;
+      }
+      return pixels == 0 ? null : luminance / pixels;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String> _readerBackgroundsDirectoryPath() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${appDir.path}/reader_backgrounds');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir.path;
+  }
+
+  Future<void> _pickCustomBackgroundImage() async {
+    if (_isPickingBackgroundImage) {
+      return;
+    }
+    setState(() {
+      _isPickingBackgroundImage = true;
+    });
+    try {
+      String? pickedPath;
+      if (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android) {
+        final picker = ImagePicker();
+        final image = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1800,
+          imageQuality: 92,
+        );
+        pickedPath = image?.path;
+      } else {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: false,
+          withData: false,
+        );
+        if (result != null && result.files.isNotEmpty) {
+          pickedPath = result.files.first.path;
+        }
+      }
+
+      if (pickedPath == null || pickedPath.isEmpty) {
+        return;
+      }
+
+      final sourceFile = File(pickedPath);
+      if (!await sourceFile.exists()) {
+        throw Exception('图片文件不存在');
+      }
+
+      final backgroundDir = await _readerBackgroundsDirectoryPath();
+      final extension = pickedPath.contains('.')
+          ? pickedPath.split('.').last.toLowerCase()
+          : 'jpg';
+      final targetPath =
+          '$backgroundDir/reader_background_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      final previousPath = _customBackgroundImagePath;
+      final copiedFile = await sourceFile.copy(targetPath);
+      await FileImage(copiedFile).evict();
+      final brightness = await _computeImageBrightness(copiedFile.path);
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _backgroundMode = _ReaderBackgroundMode.customImage;
+        _customBackgroundImagePath = copiedFile.path;
+        _customBackgroundBrightness = brightness;
+      });
+      _scheduleSaveReaderPreferences();
+
+      if (previousPath != null &&
+          previousPath.isNotEmpty &&
+          previousPath != copiedFile.path &&
+          previousPath.contains('/reader_backgrounds/')) {
+        unawaited(() async {
+          try {
+            await File(previousPath).delete();
+          } catch (_) {}
+        }());
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('正文背景图片已更新')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('选择背景图片失败: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingBackgroundImage = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _clearCustomBackgroundImage() async {
+    final previousPath = _customBackgroundImagePath;
+    setState(() {
+      _backgroundMode = _ReaderBackgroundMode.preset;
+      _customBackgroundImagePath = null;
+      _customBackgroundBrightness = null;
+      _backgroundOverlayOpacity = 0.18;
+      _backgroundBlurSigma = 0;
+      _backgroundImageFit = _ReaderBackgroundImageFit.cover;
+    });
+    _scheduleSaveReaderPreferences();
+    if (previousPath != null &&
+        previousPath.isNotEmpty &&
+        previousPath.contains('/reader_backgrounds/')) {
+      unawaited(() async {
+        try {
+          await File(previousPath).delete();
+        } catch (_) {}
+      }());
+    }
   }
 
   Widget _buildReader(Book? book) {
@@ -661,6 +963,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     return Stack(
       children: [
+        Positioned.fill(child: _buildReaderBackgroundLayer()),
+        if (_isCustomBackgroundActive)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(color: _readerReadingVeilColor),
+            ),
+          ),
         // 底层：全局单击检测（立即响应）
         // 只处理点击，不参与拖动手势竞技，避免干扰 PageView 的滑动
         RawGestureDetector(
@@ -725,30 +1034,60 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Widget _buildOpeningView(Book book) {
-    return Container(
-      color: _readerBgColor,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.2),
+    return Stack(
+      children: [
+        Positioned.fill(child: _buildReaderBackgroundLayer()),
+        if (_isCustomBackgroundActive)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(color: _readerReadingVeilColor),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '正在打开《${book.title}》',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: _textColor.withOpacity(0.72),
-                fontSize: 14,
+          ),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: _readerLoadingCardColor,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 22,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(strokeWidth: 2.2),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '正在打开《${book.title}》',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _textColor.withOpacity(0.76),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1042,10 +1381,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     required VoidCallback onTap,
     bool active = false,
   }) {
-    // 黑色背景时用更亮的颜色，浅色背景时用深色
-    final baseColor = _themeIndex == 4
-        ? Colors.white70
-        : const Color(0xFF1F2A1F);
+    final baseColor = _textColor;
     return IconButton(
       visualDensity: VisualDensity.compact,
       iconSize: 24,
@@ -1228,48 +1564,27 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _showThemePanel() async {
-    final themeColors = [
-      _ThemeOption(
-        id: 0,
-        color: const Color(0xFFF3F3F3),
-        name: '浅色',
-        icon: Icons.light_mode_rounded,
-      ),
-      _ThemeOption(
-        id: 1,
-        color: const Color(0xFFE8E2D6),
-        name: '米色',
-        icon: Icons.brightness_4_rounded,
-      ),
-      _ThemeOption(
-        id: 2,
-        color: const Color(0xFFF1F4EE),
-        name: '薄荷绿',
-        icon: Icons.emoji_nature_rounded,
-      ),
-      _ThemeOption(
-        id: 3,
-        color: const Color(0xFFA6C39D),
-        name: '绿色',
-        icon: Icons.nature_rounded,
-      ),
-      _ThemeOption(
-        id: 4,
-        color: const Color(0xFF111111),
-        name: '深色',
-        icon: Icons.dark_mode_rounded,
-      ),
-    ];
+    const themeCardWidth = 112.0;
+    const themeCardSpacing = 12.0;
+    final viewportWidth = MediaQuery.of(context).size.width - 32;
+    final initialOffset = max(
+      0.0,
+      _themeIndex * (themeCardWidth + themeCardSpacing) -
+          (viewportWidth - themeCardWidth) / 2,
+    );
+    final presetThemeScrollController = ScrollController(
+      initialScrollOffset: initialOffset,
+    );
 
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: _controlSurfaceColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
-          // Calculate background color based on current theme
           final backgroundColor = _controlSurfaceColor;
           final textColor = _textColor;
 
@@ -1277,36 +1592,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             duration: const Duration(milliseconds: 200),
             color: backgroundColor,
             child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                child: Wrap(
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 38,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: textColor.withOpacity(0.22),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Center(
-                      child: Text(
-                        '亮度与颜色',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: textColor,
-                        ),
-                      ),
-                    ),
-                    Column(
+              child: DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 0.82,
+                minChildSize: 0.56,
+                maxChildSize: 0.94,
+                builder: (context, scrollController) {
+                  return SingleChildScrollView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Center(
+                          child: Container(
+                            width: 38,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: textColor.withOpacity(0.22),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Text(
+                            '亮度与正文背景',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: textColor,
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 12),
-                        // Brightness card with modern slider
                         Container(
                           decoration: BoxDecoration(
                             color: _readerBgColor,
@@ -1371,8 +1690,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                       ),
                                       child: Text(
                                         '${(_brightnessValue * 100).round()}%',
-                                        style: TextStyle(
-                                          color: const Color(0xFF3B82F6),
+                                        style: const TextStyle(
+                                          color: Color(0xFF3B82F6),
                                           fontSize: 12,
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -1381,7 +1700,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                   ],
                                 ),
                               ),
-                              // Modern brightness slider with icons
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 4,
@@ -1452,90 +1770,134 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        // Theme color selection - 3 columns top, 2 columns bottom
-                        SizedBox(
-                          height: 240,
-                          child: Column(
-                            children: [
-                              // First row: 3 columns
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _ColorOptionCard(
-                                      theme: themeColors[0],
-                                      isSelected: _themeIndex == 0,
-                                      onTap: () {
-                                        setState(() => _themeIndex = 0);
-                                        setModalState(() {});
+                        const SizedBox(height: 18),
+                        _themeSectionTitle('纯色背景'),
+                        const SizedBox(height: 10),
+                        _buildPresetThemeStrip(
+                          presetThemeScrollController,
+                          setModalState,
+                        ),
+                        const SizedBox(height: 18),
+                        _themeSectionTitle('自定义图片'),
+                        const SizedBox(height: 10),
+                        _buildCustomBackgroundPreviewCard(),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _modernActionButton(
+                                label: _isPickingBackgroundImage
+                                    ? '选择中...'
+                                    : '更换图片',
+                                isSecondary: false,
+                                icon: Icons.photo_library_outlined,
+                                onTap: _isPickingBackgroundImage
+                                    ? null
+                                    : () async {
+                                        await _pickCustomBackgroundImage();
+                                        if (mounted) {
+                                          setModalState(() {});
+                                        }
                                       },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: _ColorOptionCard(
-                                      theme: themeColors[1],
-                                      isSelected: _themeIndex == 1,
-                                      onTap: () {
-                                        setState(() => _themeIndex = 1);
-                                        setModalState(() {});
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: _ColorOptionCard(
-                                      theme: themeColors[2],
-                                      isSelected: _themeIndex == 2,
-                                      onTap: () {
-                                        setState(() => _themeIndex = 2);
-                                        setModalState(() {});
-                                      },
-                                    ),
-                                  ),
-                                ],
                               ),
-                              const SizedBox(height: 12),
-                              // Second row: 2 columns, centered
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _ColorOptionCard(
-                                      theme: themeColors[3],
-                                      isSelected: _themeIndex == 3,
-                                      onTap: () {
-                                        setState(() => _themeIndex = 3);
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _modernActionButton(
+                                label: '恢复纯色',
+                                isSecondary: true,
+                                icon: Icons.layers_clear_outlined,
+                                onTap: _isCustomBackgroundActive
+                                    ? () {
+                                        _clearCustomBackgroundImage();
                                         setModalState(() {});
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: _ColorOptionCard(
-                                      theme: themeColors[4],
-                                      isSelected: _themeIndex == 4,
-                                      onTap: () {
-                                        setState(() => _themeIndex = 4);
-                                        setModalState(() {});
-                                      },
-                                    ),
-                                  ),
-                                ],
+                                      }
+                                    : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _buildBackgroundControlCard(
+                          title: '显示方式',
+                          subtitle: _backgroundImageFitLabel,
+                          enabled: _isCustomBackgroundActive,
+                          child: Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              _backgroundFitChip(
+                                label: '填充',
+                                fit: _ReaderBackgroundImageFit.cover,
+                                onChanged: setModalState,
+                              ),
+                              _backgroundFitChip(
+                                label: '适应',
+                                fit: _ReaderBackgroundImageFit.contain,
+                                onChanged: setModalState,
+                              ),
+                              _backgroundFitChip(
+                                label: '拉伸',
+                                fit: _ReaderBackgroundImageFit.fill,
+                                onChanged: setModalState,
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 12),
+                        _buildBackgroundControlCard(
+                          title: '遮罩强度',
+                          subtitle:
+                              '${(_backgroundOverlayOpacity * 100).round()}%',
+                          enabled: _isCustomBackgroundActive,
+                          child: _buildThemedSlider(
+                            value: _backgroundOverlayOpacity,
+                            min: 0,
+                            max: 0.6,
+                            divisions: 12,
+                            onChanged: _isCustomBackgroundActive
+                                ? (value) {
+                                    setState(() {
+                                      _backgroundOverlayOpacity = value;
+                                    });
+                                    _scheduleSaveReaderPreferences();
+                                    setModalState(() {});
+                                  }
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildBackgroundControlCard(
+                          title: '背景模糊',
+                          subtitle: _backgroundBlurSigma.toStringAsFixed(1),
+                          enabled: _isCustomBackgroundActive,
+                          child: _buildThemedSlider(
+                            value: _backgroundBlurSigma,
+                            min: 0,
+                            max: 12,
+                            divisions: 12,
+                            onChanged: _isCustomBackgroundActive
+                                ? (value) {
+                                    setState(() {
+                                      _backgroundBlurSigma = value;
+                                    });
+                                    _scheduleSaveReaderPreferences();
+                                    setModalState(() {});
+                                  }
+                                : null,
+                          ),
+                        ),
                       ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           );
         },
       ),
     );
+    presetThemeScrollController.dispose();
   }
 
   Widget _ColorOptionCard({
@@ -1597,6 +1959,340 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String get _backgroundImageFitLabel {
+    switch (_backgroundImageFit) {
+      case _ReaderBackgroundImageFit.contain:
+        return '适应';
+      case _ReaderBackgroundImageFit.fill:
+        return '拉伸';
+      case _ReaderBackgroundImageFit.cover:
+        return '填充';
+    }
+  }
+
+  Widget _themeSectionTitle(String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: _textColor.withOpacity(0.88),
+        letterSpacing: 0.2,
+      ),
+    );
+  }
+
+  void _selectPresetTheme(int themeIndex) {
+    setState(() {
+      _backgroundMode = _ReaderBackgroundMode.preset;
+      _themeIndex = themeIndex.clamp(0, 4);
+    });
+    _scheduleSaveReaderPreferences();
+  }
+
+  Widget _buildPresetThemeStrip(
+    ScrollController controller,
+    void Function(void Function()) setModalState,
+  ) {
+    return SizedBox(
+      height: 148,
+      child: ListView.separated(
+        controller: controller,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(right: 4),
+        itemCount: 5,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final theme = [
+            _ThemeOption(
+              id: 0,
+              color: const Color(0xFFF3F3F3),
+              name: '浅色',
+              icon: Icons.light_mode_rounded,
+            ),
+            _ThemeOption(
+              id: 1,
+              color: const Color(0xFFE8E2D6),
+              name: '米色',
+              icon: Icons.brightness_4_rounded,
+            ),
+            _ThemeOption(
+              id: 2,
+              color: const Color(0xFFF1F4EE),
+              name: '薄荷绿',
+              icon: Icons.emoji_nature_rounded,
+            ),
+            _ThemeOption(
+              id: 3,
+              color: const Color(0xFFA6C39D),
+              name: '绿色',
+              icon: Icons.nature_rounded,
+            ),
+            _ThemeOption(
+              id: 4,
+              color: const Color(0xFF111111),
+              name: '深色',
+              icon: Icons.dark_mode_rounded,
+            ),
+          ][index];
+          return SizedBox(
+            width: 112,
+            child: _ColorOptionCard(
+              theme: theme,
+              isSelected:
+                  _backgroundMode == _ReaderBackgroundMode.preset &&
+                  _themeIndex == index,
+              onTap: () {
+                _selectPresetTheme(index);
+                setModalState(() {});
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCustomBackgroundPreviewCard() {
+    final hasImage = _isCustomBackgroundActive;
+    final imagePath = _customBackgroundImagePath;
+    final preview = hasImage && imagePath != null
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.file(
+                  File(imagePath),
+                  fit: _readerBackgroundBoxFit,
+                  errorBuilder: (context, error, stackTrace) {
+                    return ColoredBox(
+                      color: _readerBgColor,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: _textColor.withOpacity(0.55),
+                        size: 28,
+                      ),
+                    );
+                  },
+                ),
+                if (_backgroundOverlayOpacity > 0)
+                  ColoredBox(color: _readerBackgroundOverlayColor),
+                Center(
+                  child: Container(
+                    width: 132,
+                    height: 78,
+                    decoration: BoxDecoration(
+                      color: _readerContentSurfaceColor,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: _textColor.withOpacity(0.08),
+                        width: 1,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Text(
+                      '正文预览\n风吹一页，光落一行。',
+                      style: TextStyle(
+                        color: _textColor,
+                        height: 1.5,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        : Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  _readerBgColor.withOpacity(0.95),
+                  _readerBgColor.withOpacity(0.78),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.photo_library_outlined,
+                    size: 30,
+                    color: _textColor.withOpacity(0.62),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '选择一张本地图片作为正文背景',
+                    style: TextStyle(
+                      color: _textColor.withOpacity(0.72),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+
+    return Container(
+      height: 178,
+      decoration: BoxDecoration(
+        color: _readerBgColor,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  hasImage ? '当前正文背景' : '未设置图片背景',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _textColor,
+                  ),
+                ),
+              ),
+              if (hasImage)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    _isDarkReaderBackground ? '深图' : '浅图',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF3B82F6),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(child: preview),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBackgroundControlCard({
+    required String title,
+    required String subtitle,
+    required bool enabled,
+    required Widget child,
+  }) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.55,
+      child: Container(
+        decoration: BoxDecoration(
+          color: _readerBgColor,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _textColor,
+                    ),
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF3B82F6),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _backgroundFitChip({
+    required String label,
+    required _ReaderBackgroundImageFit fit,
+    required void Function(void Function()) onChanged,
+  }) {
+    final selected = _backgroundImageFit == fit;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: _isCustomBackgroundActive
+            ? () {
+                setState(() {
+                  _backgroundImageFit = fit;
+                });
+                _scheduleSaveReaderPreferences();
+                onChanged(() {});
+              }
+            : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF3B82F6)
+                : _textColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected ? Colors.white : _textColor.withOpacity(0.82),
             ),
           ),
         ),
@@ -2050,8 +2746,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Widget _modernActionButton({
     required String label,
     required bool isSecondary,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
+    IconData? icon,
   }) {
+    final isEnabled = onTap != null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2062,10 +2760,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: isSecondary
-                ? const Color(0xFF3B82F6)
-                : _textColor.withOpacity(0.08),
+                ? const Color(0xFF3B82F6).withOpacity(isEnabled ? 1 : 0.45)
+                : _textColor.withOpacity(isEnabled ? 0.08 : 0.04),
             borderRadius: BorderRadius.circular(14),
-            boxShadow: isSecondary
+            boxShadow: isSecondary && isEnabled
                 ? [
                     BoxShadow(
                       color: const Color(0xFF3B82F6).withOpacity(0.25),
@@ -2078,21 +2776,33 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 18,
+                  color: isSecondary
+                      ? Colors.white
+                      : _textColor.withOpacity(isEnabled ? 0.74 : 0.38),
+                ),
+                const SizedBox(width: 8),
+              ],
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: isSecondary ? Colors.white : _textColor,
+                  color: isSecondary
+                      ? Colors.white
+                      : _textColor.withOpacity(isEnabled ? 1 : 0.45),
                   letterSpacing: 0.3,
                 ),
               ),
-              if (!isSecondary) ...[
+              if (!isSecondary && icon == null) ...[
                 const SizedBox(width: 6),
                 Icon(
                   Icons.refresh_rounded,
                   size: 16,
-                  color: _textColor.withOpacity(0.6),
+                  color: _textColor.withOpacity(isEnabled ? 0.6 : 0.32),
                 ),
               ],
             ],
@@ -2204,7 +2914,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     required double min,
     required double max,
     int? divisions,
-    required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChanged,
   }) {
     return SliderTheme(
       data: SliderTheme.of(context).copyWith(
@@ -4405,6 +5115,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Color get _readerBgColor {
+    if (_isCustomBackgroundActive) {
+      return _isDarkReaderBackground
+          ? const Color(0xFF0F1210)
+          : const Color(0xFFF6F1E7);
+    }
     const palette = [
       Color(0xFFF3F3F3),
       Color(0xFFE8E2D6),
@@ -4425,15 +5140,128 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return hsl.withLightness(darker).toColor();
   }
 
-  Color get _textColor =>
-      _themeIndex == 4 ? Colors.white70 : const Color(0xFF1F2A1F);
+  bool get _isCustomBackgroundActive =>
+      _backgroundMode == _ReaderBackgroundMode.customImage &&
+      _customBackgroundImagePath != null &&
+      _customBackgroundImagePath!.isNotEmpty;
 
-  Color get _ttsHighlightColor => _themeIndex == 4
+  bool get _isDarkReaderBackground {
+    if (_isCustomBackgroundActive) {
+      return (_customBackgroundBrightness ?? 0.42) < 0.45;
+    }
+    return _themeIndex == 4;
+  }
+
+  Color get _textColor => _isDarkReaderBackground
+      ? const Color(0xFFF3F5EF)
+      : const Color(0xFF1F2A1F);
+
+  Color get _readerContentSurfaceColor {
+    if (!_isCustomBackgroundActive) {
+      return Colors.transparent;
+    }
+    if (_isDarkReaderBackground) {
+      final opacity = (0.18 + _backgroundOverlayOpacity * 0.56).clamp(
+        0.18,
+        0.54,
+      );
+      return const Color(0xFF0A0C0A).withOpacity(opacity);
+    }
+    final opacity = (0.22 + _backgroundOverlayOpacity * 0.5).clamp(0.22, 0.52);
+    return const Color(0xFFFFFCF4).withOpacity(opacity);
+  }
+
+  Color get _readerReadingVeilColor {
+    if (!_isCustomBackgroundActive) {
+      return Colors.transparent;
+    }
+    if (_isDarkReaderBackground) {
+      final opacity = (0.08 + _backgroundOverlayOpacity * 0.34).clamp(
+        0.08,
+        0.28,
+      );
+      return const Color(0xFF050705).withOpacity(opacity);
+    }
+    final opacity = (0.06 + _backgroundOverlayOpacity * 0.3).clamp(0.06, 0.24);
+    return const Color(0xFFFFFBF2).withOpacity(opacity);
+  }
+
+  Color get _readerLoadingCardColor =>
+      _isCustomBackgroundActive ? _readerContentSurfaceColor : _readerBgColor;
+
+  Color get _readerBackgroundOverlayColor {
+    if (!_isCustomBackgroundActive) {
+      return Colors.transparent;
+    }
+    final overlayBase = _isDarkReaderBackground ? Colors.black : Colors.white;
+    return overlayBase.withOpacity(_backgroundOverlayOpacity);
+  }
+
+  Color get _ttsHighlightColor => _isDarkReaderBackground
       ? const Color(0xFF4C7D5B).withValues(alpha: 0.72)
       : const Color(0xFFBFE7A8).withValues(alpha: 0.9);
 
   Color get _ttsHighlightTextColor =>
-      _themeIndex == 4 ? Colors.white : const Color(0xFF182118);
+      _isDarkReaderBackground ? Colors.white : const Color(0xFF182118);
+
+  BoxFit get _readerBackgroundBoxFit {
+    switch (_backgroundImageFit) {
+      case _ReaderBackgroundImageFit.contain:
+        return BoxFit.contain;
+      case _ReaderBackgroundImageFit.fill:
+        return BoxFit.fill;
+      case _ReaderBackgroundImageFit.cover:
+        return BoxFit.cover;
+    }
+  }
+
+  Widget _buildReaderBackgroundLayer() {
+    if (!_isCustomBackgroundActive) {
+      return ColoredBox(color: _readerBgColor);
+    }
+
+    final imagePath = _customBackgroundImagePath;
+    if (imagePath == null || imagePath.isEmpty) {
+      return ColoredBox(color: _readerBgColor);
+    }
+
+    final image = Image.file(
+      File(imagePath),
+      fit: _readerBackgroundBoxFit,
+      width: double.infinity,
+      height: double.infinity,
+      errorBuilder: (context, error, stackTrace) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _backgroundMode == _ReaderBackgroundMode.customImage) {
+            _clearCustomBackgroundImage();
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('背景图片不可用，已恢复纯色背景')));
+          }
+        });
+        return ColoredBox(color: _readerBgColor);
+      },
+    );
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(color: _readerBgColor),
+        if (_backgroundBlurSigma > 0)
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: _backgroundBlurSigma,
+              sigmaY: _backgroundBlurSigma,
+            ),
+            child: image,
+          )
+        else
+          image,
+        if (_backgroundOverlayOpacity > 0)
+          ColoredBox(color: _readerBackgroundOverlayColor),
+      ],
+    );
+  }
 
   Widget _buildFloatingAudiobookButton(Book book, int totalPages) {
     final ttsState = ref.watch(ttsProvider);
