@@ -198,7 +198,9 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
         currentChapterLength: chapterLength,
         currentStartOffset: didChapterChange ? 0 : state.currentStartOffset,
         currentText: nextText,
-        currentPlaybackOffset: didChapterChange ? 0 : state.currentPlaybackOffset,
+        currentPlaybackOffset: didChapterChange
+            ? 0
+            : state.currentPlaybackOffset,
         clearCurrentSegmentOffsets: didChapterChange,
         playbackProgress: didChapterChange ? 0.0 : state.playbackProgress,
       );
@@ -580,6 +582,28 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       await setVoice(selected);
       state = state.copyWith(availableVoices: voices);
     }
+  }
+
+  void refreshCurrentBook(Book book) {
+    final currentBook = state.currentBook;
+    if (currentBook == null || currentBook.id != book.id) {
+      return;
+    }
+
+    state = state.copyWith(currentBook: book);
+    final chapterTitle = state.chapterQueue
+        .where((item) => item.index == state.currentChapterIndex)
+        .map((item) => item.title.trim())
+        .firstWhere((title) => title.isNotEmpty, orElse: () => '');
+    _ttsService.setMediaContext(
+      TtsMediaContext(
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        coverPath: book.coverPath,
+        chapterTitle: chapterTitle.isEmpty ? null : chapterTitle,
+      ),
+    );
   }
 
   String inferLocaleForBook(Book book, {String? sampleText}) {
