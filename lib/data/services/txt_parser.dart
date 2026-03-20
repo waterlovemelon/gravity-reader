@@ -50,16 +50,22 @@ class TxtParser {
       return const TxtParseResult(chapters: []);
     }
 
-    final lines = normalizedText.split('\n');
-    final headingIndexes = <int>[];
-
-    for (var i = 0; i < lines.length; i++) {
-      if (_isChapterHeading(lines[i])) {
-        headingIndexes.add(i);
+    final headingOffsets = <int>[];
+    var lineStart = 0;
+    while (lineStart < normalizedText.length) {
+      final lineEnd = normalizedText.indexOf('\n', lineStart);
+      final safeLineEnd = lineEnd == -1 ? normalizedText.length : lineEnd;
+      final line = normalizedText.substring(lineStart, safeLineEnd);
+      if (_isChapterHeading(line)) {
+        headingOffsets.add(lineStart);
       }
+      if (lineEnd == -1) {
+        break;
+      }
+      lineStart = lineEnd + 1;
     }
 
-    if (headingIndexes.isEmpty) {
+    if (headingOffsets.isEmpty) {
       return TxtParseResult(
         chapters: _splitByLength(normalizedText, chunkSize),
       );
@@ -67,8 +73,8 @@ class TxtParser {
 
     final chapters = <TxtChapter>[];
 
-    if (headingIndexes.first > 0) {
-      final preface = lines.take(headingIndexes.first).join('\n').trim();
+    if (headingOffsets.first > 0) {
+      final preface = normalizedText.substring(0, headingOffsets.first).trim();
       if (preface.isNotEmpty) {
         chapters.add(
           TxtChapter(
@@ -81,17 +87,19 @@ class TxtParser {
       }
     }
 
-    for (var i = 0; i < headingIndexes.length; i++) {
-      final start = headingIndexes[i];
-      final end = i + 1 < headingIndexes.length
-          ? headingIndexes[i + 1]
-          : lines.length;
-      final segment = lines.sublist(start, end).join('\n').trim();
+    for (var i = 0; i < headingOffsets.length; i++) {
+      final start = headingOffsets[i];
+      final end = i + 1 < headingOffsets.length
+          ? headingOffsets[i + 1]
+          : normalizedText.length;
+      final segment = normalizedText.substring(start, end).trim();
       if (segment.isEmpty) {
         continue;
       }
 
-      final title = lines[start].trim();
+      final lineEnd = normalizedText.indexOf('\n', start);
+      final titleEnd = lineEnd == -1 || lineEnd > end ? end : lineEnd;
+      final title = normalizedText.substring(start, titleEnd).trim();
       chapters.add(
         TxtChapter(
           id: 'txt_${chapters.length + 1}',

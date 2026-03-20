@@ -32,7 +32,8 @@ class BookCardWidget extends ConsumerWidget {
         );
 
         return GestureDetector(
-          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (_) => onTap?.call(),
           onLongPress: onLongPress,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

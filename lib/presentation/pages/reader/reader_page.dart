@@ -17,7 +17,7 @@ import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
-import 'package:myreader/data/services/txt_parser.dart';
+import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/pages/reader/audiobook_page.dart';
@@ -27,8 +27,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ReaderPage extends ConsumerStatefulWidget {
   final String bookId;
   final Book? initialBook;
+  final String? openTraceId;
+  final int? openStartedAtMicros;
 
-  const ReaderPage({super.key, required this.bookId, this.initialBook});
+  const ReaderPage({
+    super.key,
+    required this.bookId,
+    this.initialBook,
+    this.openTraceId,
+    this.openStartedAtMicros,
+  });
 
   @override
   ConsumerState<ReaderPage> createState() => _ReaderPageState();
@@ -46,6 +54,31 @@ class _TxtPage {
     required this.startOffset,
     required this.endOffset,
   });
+}
+
+class _TxtLocation {
+  final int chapterIndex;
+  final int offset;
+
+  const _TxtLocation({required this.chapterIndex, required this.offset});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _TxtLocation &&
+          runtimeType == other.runtimeType &&
+          chapterIndex == other.chapterIndex &&
+          offset == other.offset;
+
+  @override
+  int get hashCode => Object.hash(chapterIndex, offset);
+}
+
+class _DecodedTxtContent {
+  final String text;
+  final String encoding;
+
+  const _DecodedTxtContent({required this.text, required this.encoding});
 }
 
 @immutable
@@ -188,44 +221,6 @@ enum _ReaderPanel { none, toc, notes, progress, theme, typography }
 enum _ReaderBackgroundMode { preset, customImage }
 
 enum _ReaderBackgroundImageFit { cover, contain, fill }
-
-Map<String, dynamic> _prepareTxtChapterData(String text) {
-  final chapters = TxtParser().parse(text).chapters;
-  final chapterData = <Map<String, dynamic>>[];
-
-  if (chapters.isEmpty) {
-    chapterData.add({'title': '正文', 'content': '该 TXT 文件为空。', 'index': 0});
-  } else {
-    for (final chapter in chapters) {
-      final body = chapter.content.replaceAll('\r\n', '\n');
-      if (body.isEmpty) {
-        continue;
-      }
-      chapterData.add({
-        'title': chapter.title,
-        'content': _normalizeParagraphSpacing(body),
-        'index': chapter.index,
-      });
-    }
-    if (chapterData.isEmpty) {
-      chapterData.add({'title': '正文', 'content': '该 TXT 文件为空。', 'index': 0});
-    }
-  }
-
-  return {'chapters': chapterData};
-}
-
-String _normalizeParagraphSpacing(String text) {
-  var processed = text.replaceAll(RegExp(r'\n{2,}'), '\n\n\n\n');
-
-  // Remove leading empty lines
-  processed = processed.replaceFirst(RegExp(r'^\n+'), '');
-
-  // Remove trailing empty lines
-  processed = processed.replaceFirst(RegExp(r'\n+$'), '');
-
-  return processed;
-}
 
 class _TableOfContentsSheet extends StatefulWidget {
   final List<_TocEntry> entries;
@@ -477,9 +472,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       'reader_background_brightness_v1';
   static const bool _enablePageCountMode = false;
   // 禁用 keepPage 以避免 page storage 延迟
-  final PageController _pageController = PageController(keepPage: false);
+  late PageController _pageController;
   final int _fallbackPages = 100;
   late final AnimationController _floatingCoverController;
+  final TxtImportCacheService _txtImportCacheService =
+      const TxtImportCacheService();
 
   bool _showControls = false;
   int _currentPage = 0;
@@ -494,12 +491,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   int _txtTotalLength = 0;
   List<_TxtPage> _txtPages = const [];
   List<_TocEntry> _txtToc = const [];
+  _TxtLocation? _currentTxtLocation;
+  bool _showTxtOpeningView = false;
   int _paginationSignature = -1;
   bool _isRepaginating = false;
   bool _repaginateScheduled = false;
   int _paginationJobId = 0;
   final Map<String, List<_TxtPage>> _txtPageCache = {};
   bool _isUserPaging = false;
+  bool _isAdjustingTxtPageStream = false;
   Completer<void>? _pagingIdleCompleter;
   int? _lastPageTurnStart; // 用于追踪翻页延迟
   double _txtEdgeOverscroll = 0;
@@ -508,6 +508,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Timer? _progressSaveDebounce;
   Timer? _repaginateDebounce;
   Timer? _readerPrefsSaveDebounce;
+  Timer? _txtOpeningViewDelayTimer;
   int _readingTimeSeconds = 0;
   _ReaderPanel _activePanel = _ReaderPanel.none;
   double _brightnessValue = 0.65;
@@ -532,16 +533,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _isFloatingCoverSpinning = false;
   Offset? _floatingPlaybackOffset;
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  bool _didLogFirstFrame = false;
+  bool _didLogTxtContentFrame = false;
+
+  void _logOpenTrace(String message) {
+    final traceId = widget.openTraceId;
+    final startedAtMicros = widget.openStartedAtMicros;
+    if (traceId == null || startedAtMicros == null) {
+      return;
+    }
+    final elapsedMs =
+        (DateTime.now().microsecondsSinceEpoch - startedAtMicros) / 1000.0;
+    debugPrint(
+      '[open-book][$traceId][${elapsedMs.toStringAsFixed(1)}ms] $message',
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    _logOpenTrace('reader initState');
+    _pageController = PageController(keepPage: false);
     _floatingCoverController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 18),
     );
     _applySystemUiVisibility();
     _loadReaderPreferences();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _didLogFirstFrame) {
+        return;
+      }
+      _didLogFirstFrame = true;
+      _logOpenTrace('reader first frame rendered');
+    });
   }
 
   @override
@@ -549,6 +574,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _progressSaveDebounce?.cancel();
     _repaginateDebounce?.cancel();
     _readerPrefsSaveDebounce?.cancel();
+    _txtOpeningViewDelayTimer?.cancel();
     _autoPageTimer?.cancel();
     _floatingCoverController.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -593,6 +619,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _loadReaderPreferences() async {
+    _logOpenTrace('reader prefs load start');
     final prefs = await SharedPreferences.getInstance();
     final font = prefs.getInt(_prefFontSizePreset);
     final padding = prefs.getInt(_prefPaddingPreset);
@@ -635,6 +662,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!mounted) {
       return;
     }
+    _logOpenTrace('reader prefs load complete');
     setState(() {
       if (font != null) {
         _fontSizePreset = font.clamp(16, 40);
@@ -929,6 +957,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         !_txtLoadScheduled &&
         _canStartTxtLoad) {
       _txtLoadScheduled = true;
+      _logOpenTrace('txt load scheduled');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _loadTxtBook(book);
@@ -946,22 +975,37 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             _loadedTxtPath != book.epubPath ||
             _txtChapters.isEmpty);
 
-    if (isPreparingTxt) {
+    final shouldShowTxtOpeningView =
+        isPreparingTxt || (_isTxtBook(book) && _txtPages.isEmpty);
+
+    if (shouldShowTxtOpeningView && _showTxtOpeningView) {
       return _buildOpeningView(book);
     }
 
-    if (_isTxtBook(book) && _txtPages.isEmpty) {
-      _ensureTxtPagination();
-      return _buildOpeningView(book);
+    if (shouldShowTxtOpeningView) {
+      return Stack(
+        children: [
+          Positioned.fill(child: _buildReaderBackgroundLayer()),
+          if (_isCustomBackgroundActive)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ColoredBox(color: _readerReadingVeilColor),
+              ),
+            ),
+        ],
+      );
     }
 
     final ttsState = ref.watch(ttsProvider);
     final totalPages = _resolveTotalPages(book);
-    if (_enablePageCountMode && _isTxtBook(book) && _txtChapters.isNotEmpty) {
+    if (_enablePageCountMode &&
+        _isTxtBook(book) &&
+        _txtChapters.isNotEmpty &&
+        _txtPages.isNotEmpty) {
       _ensureTxtPagination();
     }
 
-    return Stack(
+    final readerContent = Stack(
       children: [
         Positioned.fill(child: _buildReaderBackgroundLayer()),
         if (_isCustomBackgroundActive)
@@ -995,12 +1039,28 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   itemCount: totalPages,
                   pageSnapping: true,
                   onPageChanged: (page) {
+                    if (_isTxtBook(book)) {
+                      final txtPage = _txtPages[page];
+                      final nextLocation = _TxtLocation(
+                        chapterIndex: txtPage.chapterIndex,
+                        offset: txtPage.startOffset,
+                      );
+                      setState(() {
+                        _currentPage = page;
+                        _currentTxtLocation = nextLocation;
+                        _txtToc = _buildTocFromChaptersForLocation(
+                          txtPage.chapterIndex,
+                        );
+                      });
+                      if (!_isAdjustingTxtPageStream) {
+                        _ensureTxtPageStreamAround(page);
+                      }
+                      _scheduleSaveTxtProgress(book);
+                      return;
+                    }
                     setState(() {
                       _currentPage = page;
                     });
-                    if (_isTxtBook(book)) {
-                      _scheduleSaveTxtProgress(book);
-                    }
                     if (_lastPageTurnStart != null) {
                       _lastPageTurnStart = null;
                     }
@@ -1031,6 +1091,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ), // GestureDetector 闭合
       ], // 最外层 Stack children 闭合
     ); // 最外层 Stack 闭合
+
+    return readerContent;
   }
 
   Widget _buildOpeningView(Book book) {
@@ -1043,48 +1105,114 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               child: ColoredBox(color: _readerReadingVeilColor),
             ),
           ),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: _readerLoadingCardColor,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 22,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(strokeWidth: 2.2),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '正在打开《${book.title}》',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _textColor.withOpacity(0.76),
-                        fontSize: 14,
+        SafeArea(
+          child: Column(
+            children: [
+              SizedBox(
+                height: 40,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    children: [
+                      Icon(Icons.arrow_back, size: 20, color: _textColor),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          book.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: _textColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 36),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '正在打开《${book.title}》',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _textColor.withOpacity(0.72),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Container(
+                        height: 18,
+                        width: 112,
+                        decoration: BoxDecoration(
+                          color: _textColor.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final widthFactor in [
+                              0.96,
+                              0.92,
+                              0.88,
+                              0.94,
+                              0.84,
+                              0.9,
+                              0.78,
+                            ])
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 14),
+                                child: FractionallySizedBox(
+                                  widthFactor: widthFactor,
+                                  child: Container(
+                                    height: 14,
+                                    decoration: BoxDecoration(
+                                      color: _textColor.withOpacity(0.07),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            const Spacer(),
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.1,
+                                    color: _textColor.withOpacity(0.55),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  '正在恢复阅读进度',
+                                  style: TextStyle(
+                                    color: _textColor.withOpacity(0.6),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1092,19 +1220,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Widget _buildPageContent(int index, Book book, TtsAppState ttsState) {
-    if (_isTxtBook(book) && _txtPages.isNotEmpty) {
+    if (_isTxtBook(book)) {
       final page = _txtPages[index];
       final chapter = _txtChapterByIndex[page.chapterIndex];
       final chapterText = chapter?.content ?? '';
       final safeStart = page.startOffset.clamp(0, chapterText.length);
       final safeEnd = page.endOffset.clamp(safeStart, chapterText.length);
+      final previousPage = index > 0 ? _txtPages[index - 1] : null;
+      final nextPage = index + 1 < _txtPages.length
+          ? _txtPages[index + 1]
+          : null;
       final showChapterHeader =
           page.startOffset == 0 ||
-          (index > 0 && _txtPages[index - 1].chapterIndex != page.chapterIndex);
+          previousPage == null ||
+          previousPage.chapterIndex != page.chapterIndex;
       final isLastPageOfChapter =
           safeEnd >= chapterText.length ||
-          (index < _txtPages.length - 1 &&
-              _txtPages[index + 1].chapterIndex != page.chapterIndex);
+          nextPage == null ||
+          nextPage.chapterIndex != page.chapterIndex;
       final endsAtParagraphBoundary = _endsAtParagraphBoundary(
         chapterText: chapterText,
         endOffset: safeEnd,
@@ -1142,7 +1275,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
       return SafeArea(
         key: ValueKey(
-          'reader-page-$index-'
+          'reader-page-$index-${page.chapterIndex}-${page.startOffset}-${page.endOffset}-'
           'speaking-${ttsState.isSpeaking}-'
           'paused-${ttsState.isPaused}'
           '${useHighlightKey ? '-highlight-${(ttsState.playbackProgress * 1000).round()}' : ''}',
@@ -1466,9 +1599,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       screenHeight - safeAreaTop - safeAreaBottom,
     );
     final desiredHeight = maxHeight;
-    final currentTxtChapter = _txtPages.isNotEmpty
-        ? _txtPages[_currentPage.clamp(0, _txtPages.length - 1)].chapterIndex
-        : null;
+    final currentTxtChapter = _currentTxtLocation?.chapterIndex;
     final currentTocIndex = currentTxtChapter == null
         ? entries.lastIndexWhere((entry) => entry.pageIndex <= _currentPage)
         : entries.lastIndexWhere(
@@ -3102,8 +3233,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final dx = details.localPosition.dx;
 
     if (dx < width * 0.3) {
-      if (_txtPages.isNotEmpty && _currentPage == 0) {
-        _handleTxtEdgePaging(previous: true);
+      if (_txtPages.isNotEmpty && _currentTxtLocation != null) {
+        _turnTxtPage(forward: false, book: null);
+        _lastPageTurnStart = tapStart;
+        return;
       }
       _turnPage(forward: false, totalPages: totalPages, tapStart: tapStart);
       _lastPageTurnStart = tapStart;
@@ -3111,8 +3244,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     if (dx > width * 0.7) {
-      if (_txtPages.isNotEmpty && _currentPage >= totalPages - 1) {
-        _handleTxtEdgePaging(previous: false);
+      if (_txtPages.isNotEmpty && _currentTxtLocation != null) {
+        _turnTxtPage(forward: true, book: null);
+        _lastPageTurnStart = tapStart;
+        return;
       }
       _turnPage(forward: true, totalPages: totalPages, tapStart: tapStart);
       _lastPageTurnStart = tapStart;
@@ -3127,8 +3262,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   _AudiobookLaunchData? _buildAudiobookLaunchData(Book book) {
     if (_isTxtBook(book) && _txtPages.isNotEmpty) {
-      final pageIndex = _currentPage.clamp(0, _txtPages.length - 1);
-      final page = _txtPages[pageIndex];
+      final page = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
       final chapter = _txtChapterByIndex[page.chapterIndex];
       final chapterText = chapter?.content ?? '';
       if (chapterText.trim().isEmpty) {
@@ -3142,11 +3276,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           : chapterText.substring(safeStart);
 
       var lookbackStartOffset = safeStart;
-      if (pageIndex > 0) {
-        final previousPage = _txtPages[pageIndex - 1];
-        if (previousPage.chapterIndex == page.chapterIndex) {
-          lookbackStartOffset = previousPage.startOffset.clamp(0, safeStart);
-        }
+      final previousPage = _currentPage > 0
+          ? _txtPages[_currentPage - 1]
+          : null;
+      if (previousPage != null &&
+          previousPage.chapterIndex == page.chapterIndex) {
+        lookbackStartOffset = previousPage.startOffset.clamp(0, safeStart);
       }
       String? nextChapterTitle;
       String? nextChapterText;
@@ -3391,6 +3526,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return _txtChapters[currentPos + 1].index;
   }
 
+  int? _previousTxtChapterIndex(int? currentChapterIndex) {
+    if (currentChapterIndex == null || _txtChapters.isEmpty) {
+      return null;
+    }
+    final currentPos = _txtChapters.indexWhere(
+      (chapter) => chapter.index == currentChapterIndex,
+    );
+    if (currentPos <= 0) {
+      return null;
+    }
+    return _txtChapters[currentPos - 1].index;
+  }
+
   void _jumpToTxtLocation(int chapterIndex, int offset) {
     if (_txtChapters.isEmpty || _txtChapterByIndex.isEmpty) {
       return;
@@ -3400,48 +3548,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     final safeOffset = offset.clamp(0, chapter.content.length);
-    final location = 'txt:$chapterIndex:$safeOffset';
-    final rebuilt = _buildQuickPagesFromLocation(
-      chapters: _txtChapters,
-      chapterByIndex: _txtChapterByIndex,
-      location: location,
+    _loadTxtChapterAtLocation(
+      _TxtLocation(chapterIndex: chapterIndex, offset: safeOffset),
     );
-    if (rebuilt.isEmpty) {
-      return;
-    }
-    final targetPage = _resolvePageFromLocation(location, rebuilt);
-    setState(() {
-      _txtPages = rebuilt;
-      _txtToc = _buildTocFromPages(rebuilt);
-      _currentPage = targetPage;
-    });
-    _restorePageAfterBuild(targetPage);
   }
 
   void _handleTxtEdgePaging({required bool previous}) {
-    if (_txtPages.isEmpty ||
-        _txtChapters.isEmpty ||
-        _txtChapterByIndex.isEmpty) {
-      return;
-    }
-    final current = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
-    final location = 'txt:${current.chapterIndex}:${current.startOffset}';
-    final rebuilt = _buildQuickPagesFromLocation(
-      chapters: _txtChapters,
-      chapterByIndex: _txtChapterByIndex,
-      location: location,
-    );
-    if (rebuilt.isEmpty) {
-      return;
-    }
-    final at = _resolvePageFromLocation(location, rebuilt);
-    final target = previous ? max(0, at - 1) : min(rebuilt.length - 1, at + 1);
-    setState(() {
-      _txtPages = rebuilt;
-      _txtToc = _buildTocFromPages(rebuilt);
-      _currentPage = target;
-    });
-    _restorePageAfterBuild(target);
+    _turnTxtPage(forward: !previous, book: null);
   }
 
   void _jumpToPage(int page, {int? tapStart, int? computeStart}) {
@@ -3469,14 +3582,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final currentPageAfter = _pageController.page;
 
     // 打印时间戳日志
-    if (tapStart != null) {
+    if (tapStart != null && computeStart != null) {
       print('📊 翻页延迟分析:');
       print('  点击事件 → _handleTap: 0ms');
       print(
-        '  _handleTap → _turnPage: ${(computeStart! - tapStart) / 1000}μs = ${(computeStart! - tapStart) / 1000.0}ms',
+        '  _handleTap → _turnPage: ${(computeStart - tapStart) / 1000}μs = ${(computeStart - tapStart) / 1000.0}ms',
       );
       print(
-        '  _turnPage → _jumpToPage: ${(jumpStart - computeStart!) / 1000}μs = ${(jumpStart - computeStart!) / 1000.0}ms',
+        '  _turnPage → _jumpToPage: ${(jumpStart - computeStart) / 1000}μs = ${(jumpStart - computeStart) / 1000.0}ms',
       );
       print(
         '  _jumpToPage 完成: ${(jumpEnd - jumpStart) / 1000}μs = ${(jumpEnd - jumpStart) / 1000.0}ms',
@@ -3545,6 +3658,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return false;
     }
 
+    if (notification is ScrollUpdateNotification) {
+      _handleTxtEdgeDragPaging(notification, totalPages);
+      return false;
+    }
+
     if (notification is OverscrollNotification) {
       _handleTxtOverscrollPaging(notification, totalPages);
       return false;
@@ -3559,10 +3677,69 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return false;
   }
 
+  void _handleTxtEdgeDragPaging(
+    ScrollUpdateNotification notification,
+    int totalPages,
+  ) {
+    if (_txtPages.isNotEmpty) {
+      return;
+    }
+    if (notification.metrics.axis != Axis.horizontal) {
+      return;
+    }
+    if (notification.dragDetails == null) {
+      return;
+    }
+    final scrollDelta = notification.scrollDelta;
+    if (scrollDelta == null || scrollDelta == 0) {
+      return;
+    }
+    final dragDx = notification.dragDetails?.delta.dx;
+    if (dragDx == null || dragDx == 0) {
+      return;
+    }
+
+    const edgeTolerance = 0.5;
+    final atLeadingEdge = notification.metrics.extentBefore <= edgeTolerance;
+    final atTrailingEdge = notification.metrics.extentAfter <= edgeTolerance;
+    if (!atLeadingEdge && !atTrailingEdge) {
+      return;
+    }
+
+    double? normalizedOverscroll;
+    if (atLeadingEdge && dragDx > 0) {
+      normalizedOverscroll = -scrollDelta.abs();
+    } else if (atTrailingEdge && dragDx < 0) {
+      normalizedOverscroll = scrollDelta.abs();
+    } else {
+      _txtEdgeOverscroll = 0;
+      _txtEdgePagingTriggered = false;
+      return;
+    }
+
+    final resolution = resolveTxtEdgeOverscroll(
+      accumulatedOverscroll: _txtEdgeOverscroll,
+      triggerLatched: _txtEdgePagingTriggered,
+      hasTxtPages: _txtPages.isNotEmpty,
+      hasTxtChapters: _txtChapters.isNotEmpty,
+      currentPage: _currentPage,
+      totalPages: totalPages,
+      overscroll: normalizedOverscroll,
+    );
+    _txtEdgeOverscroll = resolution.overscroll;
+    _txtEdgePagingTriggered = resolution.triggerLatched;
+    if (resolution.shouldPage) {
+      _handleTxtEdgePaging(previous: resolution.previous);
+    }
+  }
+
   void _handleTxtOverscrollPaging(
     OverscrollNotification notification,
     int totalPages,
   ) {
+    if (_txtPages.isNotEmpty) {
+      return;
+    }
     if (notification.metrics.axis != Axis.horizontal) {
       return;
     }
@@ -3624,6 +3801,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
+  void _replacePageController(int initialPage) {
+    final previous = _pageController;
+    _pageController = PageController(
+      keepPage: false,
+      initialPage: max(0, initialPage),
+    );
+    previous.dispose();
+  }
+
   void _updateAutoPageTimer(int totalPages) {
     _autoPageTimer?.cancel();
     if (!_autoPageEnabled) {
@@ -3631,6 +3817,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     _autoPageTimer = Timer.periodic(const Duration(seconds: 9), (_) {
       if (!_pageController.hasClients) {
+        return;
+      }
+      if (_txtPages.isNotEmpty && _currentTxtLocation != null) {
+        _turnTxtPage(forward: true, book: null);
         return;
       }
       final next = _currentPage + 1;
@@ -3646,27 +3836,63 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _loadTxtBook(Book book) async {
+    _logOpenTrace('txt load start');
+    _txtOpeningViewDelayTimer?.cancel();
+    _txtOpeningViewDelayTimer = Timer(const Duration(milliseconds: 140), () {
+      if (!mounted || !_isLoadingTxt) {
+        return;
+      }
+      setState(() {
+        _showTxtOpeningView = true;
+      });
+    });
     setState(() {
       _isLoadingTxt = true;
       _txtError = null;
     });
 
     try {
-      final text = await _readTxtContent(book.epubPath);
-      final prepared = await compute(_prepareTxtChapterData, text);
-      final chapters = (prepared['chapters'] as List<dynamic>)
+      final resolvedPath = await _resolveTxtPath(book.epubPath);
+      if (resolvedPath == null) {
+        throw Exception('TXT file not found. Please re-import this book.');
+      }
+
+      var cacheData = await _txtImportCacheService.read(book.id);
+      if (cacheData == null) {
+        final readStart = DateTime.now().microsecondsSinceEpoch;
+        final decoded = await _readTxtContentFromResolvedPath(resolvedPath);
+        _logOpenTrace(
+          'txt bytes+decode complete (${((DateTime.now().microsecondsSinceEpoch - readStart) / 1000.0).toStringAsFixed(1)}ms)',
+        );
+        final parseStart = DateTime.now().microsecondsSinceEpoch;
+        cacheData = await _txtImportCacheService.prepare(
+          text: decoded.text,
+          encoding: decoded.encoding,
+        );
+        _logOpenTrace(
+          'txt chapter parse complete (${((DateTime.now().microsecondsSinceEpoch - parseStart) / 1000.0).toStringAsFixed(1)}ms)',
+        );
+        await _txtImportCacheService.write(bookId: book.id, data: cacheData);
+      } else {
+        _logOpenTrace('txt structure cache hit');
+      }
+      final chapters = cacheData.chapters
           .map(
-            (e) => _TxtChapter(
-              title: e['title'] as String,
-              content: e['content'] as String,
-              index: e['index'] as int,
+            (chapter) => _TxtChapter(
+              title: chapter.title,
+              content: chapter.content,
+              index: chapter.index,
             ),
           )
-          .toList();
+          .toList(growable: false);
 
+      final progressStart = DateTime.now().microsecondsSinceEpoch;
       final existingProgress = await ref
           .read(getReadingProgressUseCaseProvider)
           .call(book.id);
+      _logOpenTrace(
+        'reading progress restored (${((DateTime.now().microsecondsSinceEpoch - progressStart) / 1000.0).toStringAsFixed(1)}ms)',
+      );
       _readingTimeSeconds = existingProgress?.readingTimeSeconds ?? 0;
 
       if (!mounted) {
@@ -3676,79 +3902,69 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       final chapterByIndex = <int, _TxtChapter>{
         for (final chapter in chapters) chapter.index: chapter,
       };
-      var totalLength = 0;
-      final chapterGlobalStart = <int, int>{};
-      for (final chapter in chapters) {
-        chapterGlobalStart[chapter.index] = totalLength;
-        totalLength += chapter.content.length;
-      }
+      final chapterGlobalStart = <int, int>{
+        for (final chapter in cacheData.chapters)
+          chapter.index: chapter.globalStart,
+      };
+      final totalLength = cacheData.totalLength;
 
-      if (_enablePageCountMode) {
-        final signature = _buildPaginationSignature();
-        final persistedPages = await _readPersistedPagination(
-          bookId: book.id,
-          signature: signature,
-          chapterByIndex: chapterByIndex,
-        );
-
-        if (persistedPages != null && persistedPages.isNotEmpty) {
-          final persistedToc = _buildTocFromPages(persistedPages);
-          final persistedPage = _resolvePageFromLocation(
-            existingProgress?.location,
-            persistedPages,
-          );
-          setState(() {
-            _txtChapters = chapters;
-            _txtChapterByIndex = chapterByIndex;
-            _txtChapterGlobalStart = chapterGlobalStart;
-            _txtTotalLength = totalLength;
-            _txtPages = persistedPages;
-            _txtToc = persistedToc;
-            _loadedTxtPath = book.epubPath;
-            _currentPage = persistedPage;
-            _paginationSignature = signature;
-            _isLoadingTxt = false;
-            _txtLoadScheduled = false;
-          });
-          _txtPageCache.clear();
-          _txtPageCache[_buildPaginationCacheKey(signature)] =
-              List<_TxtPage>.unmodifiable(persistedPages);
-          _restorePageAfterBuild(persistedPage);
-          return;
-        }
-      }
-
-      final quickPages = _buildQuickPagesFromLocation(
+      final layoutStart = DateTime.now().microsecondsSinceEpoch;
+      _logOpenTrace(
+        'txt initial viewport build start, chapters=${chapters.length}, totalLength=$totalLength',
+      );
+      final initialLocation = _resolveTxtLocationFromData(
         chapters: chapters,
         chapterByIndex: chapterByIndex,
         location: existingProgress?.location,
       );
-      final quickToc = _buildTocFromPages(quickPages);
-      final quickPage = _resolvePageFromLocation(
-        existingProgress?.location,
-        quickPages,
+      final initialPages = _buildTxtPageWindowForLocation(
+        location: initialLocation,
+        chapters: chapters,
+        chapterByIndex: chapterByIndex,
       );
-
+      final initialPageIndex = _resolvePageFromLocation(
+        'txt:${initialLocation.chapterIndex}:${initialLocation.offset}',
+        initialPages,
+      );
+      _logOpenTrace(
+        'txt initial viewport build complete (${((DateTime.now().microsecondsSinceEpoch - layoutStart) / 1000.0).toStringAsFixed(1)}ms), chapter=${initialLocation.chapterIndex}, offset=${initialLocation.offset}, pageIndex=$initialPageIndex',
+      );
+      _replacePageController(initialPageIndex);
+      _didLogTxtContentFrame = false;
       setState(() {
         _txtChapters = chapters;
         _txtChapterByIndex = chapterByIndex;
         _txtChapterGlobalStart = chapterGlobalStart;
         _txtTotalLength = totalLength;
-        _txtPages = quickPages;
-        _txtToc = quickToc;
+        _txtPages = initialPages;
+        _txtToc = _buildTocFromChapters();
+        _currentTxtLocation = initialLocation;
         _loadedTxtPath = book.epubPath;
-        _currentPage = quickPage;
+        _currentPage = initialPageIndex;
         _paginationSignature = -1;
         _isLoadingTxt = false;
+        _showTxtOpeningView = false;
         _txtLoadScheduled = false;
       });
+      _logOpenTrace('txt reader state committed');
 
+      _txtOpeningViewDelayTimer?.cancel();
       _txtPageCache.clear();
-      _restorePageAfterBuild(quickPage);
-      if (_enablePageCountMode) {
-        _scheduleRepaginate(anchorLocation: existingProgress?.location);
-      }
+      _logOpenTrace(
+        'txt load ready from location, chapter=${initialLocation.chapterIndex}, offset=${initialLocation.offset}',
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _didLogTxtContentFrame || _txtPages.isEmpty) {
+          return;
+        }
+        _didLogTxtContentFrame = true;
+        final page = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
+        _logOpenTrace(
+          'txt content frame rendered, chapter=${page.chapterIndex}, page=${page.startOffset}-${page.endOffset}',
+        );
+      });
     } catch (e) {
+      _logOpenTrace('txt load failed: $e');
       if (!mounted) {
         return;
       }
@@ -3756,8 +3972,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _txtError = 'Failed to load TXT: $e';
         _loadedTxtPath = book.epubPath;
         _isLoadingTxt = false;
+        _showTxtOpeningView = false;
         _txtLoadScheduled = false;
       });
+      _txtOpeningViewDelayTimer?.cancel();
     }
   }
 
@@ -3779,7 +3997,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   int _resolveTotalPages(Book book) {
     if (_isTxtBook(book)) {
-      return _txtPages.isEmpty ? 1 : _txtPages.length;
+      return max(1, _txtPages.length);
     }
     return book.totalPages ?? _fallbackPages;
   }
@@ -3790,37 +4008,239 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (_txtChapters.isEmpty) {
       return const [];
     }
-    final currentChapterIndex = _txtPages.isEmpty
-        ? null
-        : _txtPages[_currentPage.clamp(0, _txtPages.length - 1)].chapterIndex;
-    final chapterPageMap = <int, int>{};
-    for (var i = 0; i < _txtPages.length; i++) {
-      final chapterIndex = _txtPages[i].chapterIndex;
-      chapterPageMap.putIfAbsent(chapterIndex, () => i);
+    return _buildTocFromChaptersForLocation(_currentTxtLocation?.chapterIndex);
+  }
+
+  List<_TocEntry> _buildTocFromChaptersForLocation(int? currentChapterIndex) {
+    if (_txtChapters.isEmpty) {
+      return const [];
     }
     final toc = _txtChapters
+        .asMap()
+        .entries
         .map(
-          (chapter) => _TocEntry(
-            title: chapter.title,
-            pageIndex: chapterPageMap[chapter.index] ?? _currentPage,
-            chapterIndex: chapter.index,
+          (entry) => _TocEntry(
+            title: entry.value.title,
+            pageIndex: entry.key,
+            chapterIndex: entry.value.index,
           ),
         )
         .toList();
     if (currentChapterIndex != null &&
         !toc.any((entry) => entry.chapterIndex == currentChapterIndex)) {
-      final currentPage =
-          _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
       toc.insert(
         0,
         _TocEntry(
-          title: currentPage.title,
-          pageIndex: _currentPage,
+          title: _txtChapterByIndex[currentChapterIndex]?.title ?? '当前位置',
+          pageIndex: 0,
           chapterIndex: currentChapterIndex,
         ),
       );
     }
     return toc;
+  }
+
+  List<_TxtPage> _paginateChapterPages(_TxtChapter chapter) {
+    final text = chapter.content;
+    if (text.isEmpty) {
+      return [
+        _TxtPage(
+          title: chapter.title,
+          chapterIndex: chapter.index,
+          startOffset: 0,
+          endOffset: 0,
+        ),
+      ];
+    }
+
+    final width = _contentMaxWidth;
+    final height = _contentMaxHeight;
+    final style = _paginationTextStyle();
+    final pages = <_TxtPage>[];
+    var start = 0;
+    while (start < text.length) {
+      final end = _pageEndForText(
+        text: text,
+        start: start,
+        width: width,
+        height: height,
+        style: style,
+        chapterTitle: chapter.title,
+      );
+      pages.add(
+        _TxtPage(
+          title: chapter.title,
+          chapterIndex: chapter.index,
+          startOffset: start,
+          endOffset: end,
+        ),
+      );
+      if (end <= start) {
+        break;
+      }
+      start = end;
+    }
+    if (pages.isEmpty) {
+      pages.add(
+        _TxtPage(
+          title: chapter.title,
+          chapterIndex: chapter.index,
+          startOffset: 0,
+          endOffset: min(1, text.length),
+        ),
+      );
+    }
+    return pages;
+  }
+
+  List<_TxtPage> _buildTxtPageWindowForLocation({
+    required _TxtLocation location,
+    List<_TxtChapter>? chapters,
+    Map<int, _TxtChapter>? chapterByIndex,
+  }) {
+    final sourceChapters = chapters ?? _txtChapters;
+    final sourceChapterByIndex = chapterByIndex ?? _txtChapterByIndex;
+    if (sourceChapters.isEmpty || sourceChapterByIndex.isEmpty) {
+      return const [];
+    }
+
+    final currentPos = sourceChapters.indexWhere(
+      (chapter) => chapter.index == location.chapterIndex,
+    );
+    if (currentPos < 0) {
+      return const [];
+    }
+
+    final pages = <_TxtPage>[];
+    final startPos = max(0, currentPos - 1);
+    final endPos = min(sourceChapters.length - 1, currentPos + 1);
+    for (var pos = startPos; pos <= endPos; pos++) {
+      pages.addAll(_paginateChapterPages(sourceChapters[pos]));
+    }
+    return pages;
+  }
+
+  void _ensureTxtPageStreamAround(int page) {
+    if (_txtPages.isEmpty ||
+        _txtChapters.isEmpty ||
+        _isAdjustingTxtPageStream) {
+      return;
+    }
+    if (page <= 1) {
+      final firstChapterIndex = _txtPages.first.chapterIndex;
+      final previousChapterIndex = _previousTxtChapterIndex(firstChapterIndex);
+      if (previousChapterIndex != null &&
+          previousChapterIndex != firstChapterIndex &&
+          !_txtPages.any((item) => item.chapterIndex == previousChapterIndex)) {
+        _prependTxtChapter(previousChapterIndex);
+      }
+    }
+    if (page >= _txtPages.length - 2) {
+      final lastChapterIndex = _txtPages.last.chapterIndex;
+      final nextChapterIndex = _nextTxtChapterIndex(lastChapterIndex);
+      if (nextChapterIndex != null &&
+          nextChapterIndex != lastChapterIndex &&
+          !_txtPages.any((item) => item.chapterIndex == nextChapterIndex)) {
+        _appendTxtChapter(nextChapterIndex);
+      }
+    }
+  }
+
+  void _appendTxtChapter(int chapterIndex) {
+    final chapter = _txtChapterByIndex[chapterIndex];
+    if (chapter == null) {
+      return;
+    }
+    final additionalPages = _paginateChapterPages(chapter);
+    if (additionalPages.isEmpty) {
+      return;
+    }
+    setState(() {
+      _txtPages = List<_TxtPage>.unmodifiable(<_TxtPage>[
+        ..._txtPages,
+        ...additionalPages,
+      ]);
+    });
+  }
+
+  void _prependTxtChapter(int chapterIndex) {
+    final chapter = _txtChapterByIndex[chapterIndex];
+    if (chapter == null) {
+      return;
+    }
+    final additionalPages = _paginateChapterPages(chapter);
+    if (additionalPages.isEmpty) {
+      return;
+    }
+    final shiftedPage = _currentPage + additionalPages.length;
+    _isAdjustingTxtPageStream = true;
+    setState(() {
+      _txtPages = List<_TxtPage>.unmodifiable(<_TxtPage>[
+        ...additionalPages,
+        ..._txtPages,
+      ]);
+      _currentPage = shiftedPage;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(shiftedPage);
+      }
+      _isAdjustingTxtPageStream = false;
+    });
+  }
+
+  void _loadTxtChapterAtLocation(
+    _TxtLocation location, {
+    bool resetController = true,
+    bool jumpToLastPage = false,
+  }) {
+    if (_txtChapters.isEmpty || _txtChapterByIndex.isEmpty) {
+      return;
+    }
+    final chapter = _txtChapterByIndex[location.chapterIndex];
+    if (chapter == null) {
+      return;
+    }
+    final pages = _buildTxtPageWindowForLocation(location: location);
+    if (pages.isEmpty) {
+      return;
+    }
+    final targetPage = jumpToLastPage
+        ? max(
+            0,
+            pages.lastIndexWhere(
+              (page) => page.chapterIndex == location.chapterIndex,
+            ),
+          )
+        : _resolvePageFromLocation(
+            'txt:${location.chapterIndex}:${location.offset}',
+            pages,
+          );
+    final targetTxtPage = pages[targetPage];
+    final resolvedLocation = _TxtLocation(
+      chapterIndex: targetTxtPage.chapterIndex,
+      offset: targetTxtPage.startOffset,
+    );
+
+    if (resetController) {
+      _replacePageController(targetPage);
+    }
+
+    setState(() {
+      _txtPages = List<_TxtPage>.unmodifiable(pages);
+      _txtToc = _buildTocFromChaptersForLocation(chapter.index);
+      _currentTxtLocation = resolvedLocation;
+      _currentPage = targetPage;
+      _txtEdgeOverscroll = 0;
+      _txtEdgePagingTriggered = false;
+    });
+
+    if (resetController) {
+      _restorePageAfterBuild(targetPage);
+    }
   }
 
   void _ensureTxtPagination() {
@@ -3952,6 +4372,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return '${dir.path}/${bookId}_$signature.json';
   }
 
+  // ignore: unused_element
   Future<List<_TxtPage>?> _readPersistedPagination({
     required String bookId,
     required int signature,
@@ -4590,6 +5011,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return estimate.clamp(120, 2200);
   }
 
+  // ignore: unused_element
   List<_TxtPage> _buildQuickPagesFromLocation({
     required List<_TxtChapter> chapters,
     required Map<int, _TxtChapter> chapterByIndex,
@@ -4770,11 +5192,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   double get _currentProgressPercent {
-    if (_txtPages.isNotEmpty && _txtTotalLength > 0) {
-      return (_globalOffsetForPage(_currentPage) / _txtTotalLength).clamp(
-        0.0,
-        1.0,
-      );
+    if (_currentTxtLocation != null && _txtTotalLength > 0) {
+      return (_globalOffsetForLocation(_currentTxtLocation!) / _txtTotalLength)
+          .clamp(0.0, 1.0);
     }
     final total = max(1, _txtPages.isEmpty ? _fallbackPages : _txtPages.length);
     return (_currentPage / total).clamp(0.0, 1.0);
@@ -4799,51 +5219,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
     }
 
-    final location = 'txt:$targetChapterIndex:$targetOffsetInChapter';
-    final rebuilt = _buildQuickPagesFromLocation(
-      chapters: _txtChapters,
-      chapterByIndex: _txtChapterByIndex,
-      location: location,
+    _loadTxtChapterAtLocation(
+      _TxtLocation(
+        chapterIndex: targetChapterIndex,
+        offset: targetOffsetInChapter,
+      ),
     );
-    if (rebuilt.isEmpty) {
-      return;
-    }
-    final targetPage = _resolvePageFromLocation(location, rebuilt);
-    setState(() {
-      _txtPages = rebuilt;
-      _txtToc = _buildTocFromPages(rebuilt);
-      _currentPage = targetPage;
-    });
-    _restorePageAfterBuild(targetPage);
   }
 
   void _jumpToTxtChapter(int chapterIndex) {
     if (_txtChapters.isEmpty || _txtChapterByIndex.isEmpty) {
       return;
     }
-    for (var i = 0; i < _txtPages.length; i++) {
-      if (_txtPages[i].chapterIndex == chapterIndex) {
-        _jumpToPage(i);
-        return;
-      }
-    }
-
-    final location = 'txt:$chapterIndex:0';
-    final rebuilt = _buildQuickPagesFromLocation(
-      chapters: _txtChapters,
-      chapterByIndex: _txtChapterByIndex,
-      location: location,
+    _loadTxtChapterAtLocation(
+      _TxtLocation(chapterIndex: chapterIndex, offset: 0),
     );
-    if (rebuilt.isEmpty) {
-      return;
-    }
-    final targetPage = _resolvePageFromLocation(location, rebuilt);
-    setState(() {
-      _txtPages = rebuilt;
-      _txtToc = _buildTocFromPages(rebuilt);
-      _currentPage = targetPage;
-    });
-    _restorePageAfterBuild(targetPage);
   }
 
   void _scheduleSaveTxtProgress(Book book) {
@@ -4877,14 +5267,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!_isTxtBook(book)) {
       return;
     }
-    final hasPages = _txtPages.isNotEmpty;
-    final safePage = hasPages ? _currentPage.clamp(0, _txtPages.length - 1) : 0;
-    final location = hasPages ? _locationForPage(safePage) : 'txt:0:0';
-    final globalOffset = hasPages ? _globalOffsetForPage(safePage) : 0;
-    final percent = !hasPages
+    final currentLocation = _currentTxtLocation;
+    final location = currentLocation == null
+        ? 'txt:0:0'
+        : 'txt:${currentLocation.chapterIndex}:${currentLocation.offset}';
+    final globalOffset = currentLocation == null
+        ? 0
+        : _globalOffsetForLocation(currentLocation);
+    final percent = currentLocation == null || _txtTotalLength <= 0
         ? 0.0
-        : _txtTotalLength <= 0
-        ? (safePage + 1) / _txtPages.length
         : (globalOffset / _txtTotalLength).clamp(0.0, 1.0);
     final progress = ReadingProgress(
       bookId: book.id,
@@ -4897,47 +5288,115 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     await ref.read(updateReadingProgressUseCaseProvider).call(progress);
   }
 
-  int _globalOffsetForPage(int pageIndex) {
-    if (_txtPages.isEmpty) {
-      return 0;
-    }
-    final safeIndex = pageIndex.clamp(0, _txtPages.length - 1);
-    final page = _txtPages[safeIndex];
-    final chapterStart = _txtChapterGlobalStart[page.chapterIndex] ?? 0;
-    return chapterStart + page.startOffset;
+  int _globalOffsetForLocation(_TxtLocation location) {
+    final chapterStart = _txtChapterGlobalStart[location.chapterIndex] ?? 0;
+    return chapterStart + location.offset;
   }
 
-  Future<String> _readTxtContent(String path) async {
-    final resolvedPath = await _resolveTxtPath(path);
-    if (resolvedPath == null) {
-      throw Exception('TXT file not found. Please re-import this book.');
+  // ignore: unused_element
+  _TxtLocation _resolveTxtLocation(String? location) {
+    if (_txtChapters.isEmpty) {
+      return const _TxtLocation(chapterIndex: 0, offset: 0);
+    }
+    return _resolveTxtLocationFromData(
+      chapters: _txtChapters,
+      chapterByIndex: _txtChapterByIndex,
+      location: location,
+    );
+  }
+
+  _TxtLocation _resolveTxtLocationFromData({
+    required List<_TxtChapter> chapters,
+    required Map<int, _TxtChapter> chapterByIndex,
+    required String? location,
+  }) {
+    if (chapters.isEmpty) {
+      return const _TxtLocation(chapterIndex: 0, offset: 0);
+    }
+    var chapterIndex = chapters.first.index;
+    var offset = 0;
+    if (location != null && location.startsWith('txt:')) {
+      final parts = location.split(':');
+      if (parts.length >= 3) {
+        chapterIndex = int.tryParse(parts[1]) ?? chapterIndex;
+        offset = int.tryParse(parts[2]) ?? 0;
+      }
+    }
+    final chapter = chapterByIndex[chapterIndex] ?? chapters.first;
+    return _TxtLocation(
+      chapterIndex: chapter.index,
+      offset: offset.clamp(0, chapter.content.length),
+    );
+  }
+
+  void _turnTxtPage({required bool forward, Book? book}) {
+    if (_txtPages.isEmpty || _currentTxtLocation == null) {
+      return;
+    }
+    if (forward && _currentPage >= _txtPages.length - 2) {
+      final nextChapterIndex = _nextTxtChapterIndex(
+        _txtPages.last.chapterIndex,
+      );
+      if (nextChapterIndex != null &&
+          !_txtPages.any((item) => item.chapterIndex == nextChapterIndex)) {
+        _appendTxtChapter(nextChapterIndex);
+      }
+    }
+    if (!forward && _currentPage <= 1) {
+      final previousChapterIndex = _previousTxtChapterIndex(
+        _txtPages.first.chapterIndex,
+      );
+      if (previousChapterIndex != null &&
+          !_txtPages.any((item) => item.chapterIndex == previousChapterIndex)) {
+        _prependTxtChapter(previousChapterIndex);
+      }
     }
 
+    final targetPage = forward ? _currentPage + 1 : _currentPage - 1;
+    if (targetPage >= 0 && targetPage < _txtPages.length) {
+      _jumpToPage(targetPage);
+      if (book != null) {
+        _scheduleSaveTxtProgress(book);
+      }
+      return;
+    }
+  }
+
+  Future<_DecodedTxtContent> _readTxtContentFromResolvedPath(
+    String resolvedPath,
+  ) async {
     final bytes = await File(resolvedPath).readAsBytes();
+
     try {
-      return utf8.decode(bytes);
+      return _DecodedTxtContent(text: utf8.decode(bytes), encoding: 'utf8');
     } catch (_) {
       final gb18030Text = await CharsetConverter.decode('gb18030', bytes);
       if (_containsReadableCjk(gb18030Text)) {
-        return gb18030Text;
+        return _DecodedTxtContent(text: gb18030Text, encoding: 'gb18030');
       }
 
       final gbkText = await CharsetConverter.decode('gbk', bytes);
       if (_containsReadableCjk(gbkText)) {
-        return gbkText;
+        return _DecodedTxtContent(text: gbkText, encoding: 'gbk');
       }
 
       final utf8Text = utf8.decode(bytes, allowMalformed: true);
       if (utf8Text.trim().isNotEmpty) {
-        return utf8Text;
+        return _DecodedTxtContent(text: utf8Text, encoding: 'utf8_malformed');
       }
 
       final latinText = latin1.decode(bytes, allowInvalid: true);
       if (latinText.trim().isNotEmpty) {
-        return latinText;
+        return _DecodedTxtContent(text: latinText, encoding: 'latin1');
       }
 
-      return gb18030Text.trim().isNotEmpty ? gb18030Text : gbkText;
+      if (gb18030Text.trim().isNotEmpty) {
+        return _DecodedTxtContent(text: gb18030Text, encoding: 'gb18030');
+      }
+      if (gbkText.trim().isNotEmpty) {
+        return _DecodedTxtContent(text: gbkText, encoding: 'gbk');
+      }
+      return _DecodedTxtContent(text: utf8Text, encoding: 'utf8_malformed');
     }
   }
 
@@ -5185,9 +5644,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final opacity = (0.06 + _backgroundOverlayOpacity * 0.3).clamp(0.06, 0.24);
     return const Color(0xFFFFFBF2).withOpacity(opacity);
   }
-
-  Color get _readerLoadingCardColor =>
-      _isCustomBackgroundActive ? _readerContentSurfaceColor : _readerBgColor;
 
   Color get _readerBackgroundOverlayColor {
     if (!_isCustomBackgroundActive) {
@@ -5631,23 +6087,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return ((_currentPage + 1) / max(1, totalPages)).clamp(0.0, 1.0);
     }
 
-    final safePage = _currentPage.clamp(0, _txtPages.length - 1);
-    final currentChapterIndex = _txtPages[safePage].chapterIndex;
-    var chapterStartPage = safePage;
-    while (chapterStartPage > 0 &&
-        _txtPages[chapterStartPage - 1].chapterIndex == currentChapterIndex) {
-      chapterStartPage--;
+    final currentPage = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
+    final chapter = _txtChapterByIndex[currentPage.chapterIndex];
+    if (chapter == null || chapter.content.isEmpty) {
+      return 0.0;
     }
-
-    var chapterEndPage = safePage;
-    while (chapterEndPage < _txtPages.length - 1 &&
-        _txtPages[chapterEndPage + 1].chapterIndex == currentChapterIndex) {
-      chapterEndPage++;
-    }
-
-    final chapterPageCount = chapterEndPage - chapterStartPage + 1;
-    final pageProgress = safePage - chapterStartPage + 1;
-    return (pageProgress / max(1, chapterPageCount)).clamp(0.0, 1.0);
+    return (currentPage.endOffset / chapter.content.length).clamp(0.0, 1.0);
   }
 
   Widget _buildFloatingPlaybackCoverPlaceholder(Book book) {
