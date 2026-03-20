@@ -10,7 +10,7 @@ import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
-import 'package:myreader/data/services/txt_parser.dart';
+import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/flureadium_integration/epub_parser.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
@@ -25,7 +25,17 @@ class BookshelfPage extends ConsumerStatefulWidget {
 
 class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   final TextEditingController _searchController = TextEditingController();
+  final TxtImportCacheService _txtImportCacheService =
+      const TxtImportCacheService();
   bool _isSearching = false;
+
+  void _logOpenTrace(String traceId, int startedAtMicros, String message) {
+    final elapsedMs =
+        (DateTime.now().microsecondsSinceEpoch - startedAtMicros) / 1000.0;
+    debugPrint(
+      '[open-book][$traceId][${elapsedMs.toStringAsFixed(1)}ms] $message',
+    );
+  }
 
   @override
   void initState() {
@@ -225,15 +235,89 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              ref.read(booksProvider.notifier).deleteBook(bookId);
+            onPressed: () async {
               Navigator.pop(context);
+              await _deleteBookAndAssets(bookId);
             },
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _deleteBookAndAssets(String bookId) async {
+    final books = ref.read(booksProvider).books;
+    Book? book;
+    for (final item in books) {
+      if (item.id == bookId) {
+        book = item;
+        break;
+      }
+    }
+
+    try {
+      if (book != null) {
+        await _cleanupBookFiles(book);
+      }
+      await ref.read(booksProvider.notifier).deleteBook(bookId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除书籍失败: $e')));
+      }
+    }
+  }
+
+  Future<void> _cleanupBookFiles(Book book) async {
+    await _deleteManagedFile(book.epubPath, managedFolderName: 'books');
+    await _deleteManagedFile(book.coverPath, managedFolderName: 'covers');
+    await _txtImportCacheService.delete(book.id);
+    await _deletePaginationCaches(book.id);
+  }
+
+  Future<void> _deleteManagedFile(
+    String? path, {
+    required String managedFolderName,
+  }) async {
+    if (path == null || path.isEmpty) {
+      return;
+    }
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final managedDirPath = '${appDir.path}/$managedFolderName/';
+      if (!path.contains(managedDirPath)) {
+        return;
+      }
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // Ignore missing/locked files so database deletion can still proceed.
+    }
+  }
+
+  Future<void> _deletePaginationCaches(String bookId) async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final dir = Directory('${appDir.path}/pagination_cache');
+      if (!await dir.exists()) {
+        return;
+      }
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File) {
+          continue;
+        }
+        final name = entity.path.split('/').last;
+        if (name.startsWith('${bookId}_') && name.endsWith('.json')) {
+          await entity.delete();
+        }
+      }
+    } catch (_) {
+      // Ignore pagination cache cleanup failures during book deletion.
+    }
   }
 
   Future<void> _pickAndUpdateCover(String bookId) async {
@@ -358,6 +442,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       await sourceFile.copy(newPath);
 
       final baseTitle = pickedFileName.replaceFirst(RegExp(r'\\.[^.]+$'), '');
+      final bookId = DateTime.now().millisecondsSinceEpoch.toString();
       String? coverPath;
       String? title;
       String? author;
@@ -383,15 +468,19 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
           );
         }
       } else {
-        final rawText = await _readTxtContent(newPath);
-        final txtResult = TxtParser().parse(rawText);
+        final decoded = await _readTxtContent(newPath);
+        final cacheData = await _txtImportCacheService.prepare(
+          text: decoded.text,
+          encoding: decoded.encoding,
+        );
+        await _txtImportCacheService.write(bookId: bookId, data: cacheData);
         title = baseTitle;
-        totalPages = txtResult.chapters.isEmpty ? 1 : txtResult.chapters.length;
+        totalPages = cacheData.chapters.isEmpty ? 1 : cacheData.chapters.length;
       }
 
       // Create book entity
       final book = Book(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: bookId,
         title: title ?? baseTitle,
         author: author,
         coverPath: coverPath,
@@ -439,58 +528,70 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   }
 
   Future<void> _openReader(Book book) async {
+    final startedAtMicros = DateTime.now().microsecondsSinceEpoch;
+    final traceId = '${book.id}-${startedAtMicros.toRadixString(36)}';
+    _logOpenTrace(traceId, startedAtMicros, 'tap received: ${book.title}');
     await Navigator.of(context).push(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 220),
-        reverseTransitionDuration: const Duration(milliseconds: 180),
-        pageBuilder: (_, __, ___) =>
-            ReaderPage(bookId: book.id, initialBook: book),
+        transitionDuration: const Duration(milliseconds: 100),
+        reverseTransitionDuration: const Duration(milliseconds: 120),
+        pageBuilder: (_, __, ___) => ReaderPage(
+          bookId: book.id,
+          initialBook: book,
+          openTraceId: traceId,
+          openStartedAtMicros: startedAtMicros,
+        ),
         transitionsBuilder: (_, animation, __, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.linearToEaseOut,
+            reverseCurve: Curves.easeIn,
+          ),
           child: child,
         ),
       ),
     );
+    _logOpenTrace(traceId, startedAtMicros, 'reader popped');
     if (!mounted) {
       return;
     }
     await ref.read(booksProvider.notifier).loadBooks();
   }
 
-  Future<String> _readTxtContent(String path) async {
+  Future<_DecodedTxtContent> _readTxtContent(String path) async {
     final bytes = await File(path).readAsBytes();
 
     // Prefer UTF-8, fallback to common Chinese encodings (GB18030/GBK), then tolerant decode.
     try {
-      return utf8.decode(bytes);
+      return _DecodedTxtContent(text: utf8.decode(bytes), encoding: 'utf8');
     } catch (_) {
       final gb18030Text = await CharsetConverter.decode('gb18030', bytes);
       if (_containsReadableCjk(gb18030Text)) {
-        return gb18030Text;
+        return _DecodedTxtContent(text: gb18030Text, encoding: 'gb18030');
       }
 
       final gbkText = await CharsetConverter.decode('gbk', bytes);
       if (_containsReadableCjk(gbkText)) {
-        return gbkText;
+        return _DecodedTxtContent(text: gbkText, encoding: 'gbk');
       }
 
       final utf8Text = utf8.decode(bytes, allowMalformed: true);
       if (utf8Text.trim().isNotEmpty) {
-        return utf8Text;
+        return _DecodedTxtContent(text: utf8Text, encoding: 'utf8_malformed');
       }
 
       final latinText = latin1.decode(bytes, allowInvalid: true);
       if (latinText.trim().isNotEmpty) {
-        return latinText;
+        return _DecodedTxtContent(text: latinText, encoding: 'latin1');
       }
 
       if (gb18030Text.trim().isNotEmpty) {
-        return gb18030Text;
+        return _DecodedTxtContent(text: gb18030Text, encoding: 'gb18030');
       }
       if (gbkText.trim().isNotEmpty) {
-        return gbkText;
+        return _DecodedTxtContent(text: gbkText, encoding: 'gbk');
       }
-      return utf8Text;
+      return _DecodedTxtContent(text: utf8Text, encoding: 'utf8_malformed');
     }
   }
 
@@ -511,6 +612,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     }
     return false;
   }
+}
+
+class _DecodedTxtContent {
+  final String text;
+  final String encoding;
+
+  const _DecodedTxtContent({required this.text, required this.encoding});
 }
 
 class _ShelfTab extends ConsumerWidget {
