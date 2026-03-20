@@ -83,6 +83,12 @@ final getReadingProgressUseCaseProvider = Provider<GetReadingProgressUseCase>((
   return GetReadingProgressUseCase(repository);
 });
 
+final getAllReadingProgressUseCaseProvider =
+    Provider<GetAllReadingProgressUseCase>((ref) {
+      final repository = ref.watch(readingRepositoryProvider);
+      return GetAllReadingProgressUseCase(repository);
+    });
+
 final updateReadingProgressUseCaseProvider =
     Provider<UpdateReadingProgressUseCase>((ref) {
       final repository = ref.watch(readingRepositoryProvider);

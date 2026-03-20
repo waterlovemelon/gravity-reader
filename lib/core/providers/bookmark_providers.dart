@@ -108,3 +108,10 @@ final readingProgressProvider =
     >((ref, bookId) {
       return ReadingProgressNotifier(ref, bookId);
     });
+
+final allReadingProgressProvider = FutureProvider<Map<String, ReadingProgress>>(
+  (ref) async {
+    final getAllProgress = ref.watch(getAllReadingProgressUseCaseProvider);
+    return getAllProgress();
+  },
+);

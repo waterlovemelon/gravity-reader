@@ -30,7 +30,7 @@ class BooksState {
   }
 }
 
-enum BookSortMode { latestAdded, recentRead, title, author }
+enum BookSortMode { latestAdded, recentRead, progress, title, author }
 
 class BooksNotifier extends StateNotifier<BooksState> {
   final Ref _ref;
@@ -42,10 +42,8 @@ class BooksNotifier extends StateNotifier<BooksState> {
     try {
       final getBooks = _ref.read(getBooksUseCaseProvider);
       final books = await getBooks();
-      state = state.copyWith(
-        books: _applySort(books, state.sortMode),
-        isLoading: false,
-      );
+      final sortedBooks = await _applySort(books, state.sortMode);
+      state = state.copyWith(books: sortedBooks, isLoading: false);
     } catch (e) {
       state = state.copyWith(error: e.toString(), isLoading: false);
     }
@@ -56,23 +54,19 @@ class BooksNotifier extends StateNotifier<BooksState> {
     try {
       final searchBooks = _ref.read(searchBooksUseCaseProvider);
       final books = await searchBooks(query);
-      state = state.copyWith(
-        books: _applySort(books, state.sortMode),
-        isLoading: false,
-      );
+      final sortedBooks = await _applySort(books, state.sortMode);
+      state = state.copyWith(books: sortedBooks, isLoading: false);
     } catch (e) {
       state = state.copyWith(error: e.toString(), isLoading: false);
     }
   }
 
-  void setSortMode(BookSortMode mode) {
+  Future<void> setSortMode(BookSortMode mode) async {
     if (mode == state.sortMode) {
       return;
     }
-    state = state.copyWith(
-      sortMode: mode,
-      books: _applySort(state.books, mode),
-    );
+    final sortedBooks = await _applySort(state.books, mode);
+    state = state.copyWith(sortMode: mode, books: sortedBooks);
   }
 
   Future<void> deleteBook(String id) async {
@@ -95,7 +89,7 @@ class BooksNotifier extends StateNotifier<BooksState> {
     }
   }
 
-  List<Book> _applySort(List<Book> books, BookSortMode mode) {
+  Future<List<Book>> _applySort(List<Book> books, BookSortMode mode) async {
     final sorted = List<Book>.from(books);
     switch (mode) {
       case BookSortMode.latestAdded:
@@ -121,6 +115,25 @@ class BooksNotifier extends StateNotifier<BooksState> {
           final cmp = bRead.compareTo(aRead);
           if (cmp != 0) return cmp;
           return b.importedAt.compareTo(a.importedAt);
+        });
+        break;
+      case BookSortMode.progress:
+        final getAllProgress = _ref.read(getAllReadingProgressUseCaseProvider);
+        final progressMap = await getAllProgress();
+        sorted.sort((a, b) {
+          final aProgress = progressMap[a.id];
+          final bProgress = progressMap[b.id];
+          final aPercentage = aProgress?.percentage ?? 0.0;
+          final bPercentage = bProgress?.percentage ?? 0.0;
+          final percentageCompare = bPercentage.compareTo(aPercentage);
+          if (percentageCompare != 0) {
+            return percentageCompare;
+          }
+          final aLastRead =
+              aProgress?.lastReadAt ?? a.lastReadAt ?? a.importedAt;
+          final bLastRead =
+              bProgress?.lastReadAt ?? b.lastReadAt ?? b.importedAt;
+          return bLastRead.compareTo(aLastRead);
         });
         break;
       case BookSortMode.title:

@@ -29,6 +29,9 @@ class ReaderPage extends ConsumerStatefulWidget {
   final Book? initialBook;
   final String? openTraceId;
   final int? openStartedAtMicros;
+  final bool autoStartFloatingPlayback;
+  final bool popAfterAutoStart;
+  final bool hiddenForAutoStart;
 
   const ReaderPage({
     super.key,
@@ -36,6 +39,9 @@ class ReaderPage extends ConsumerStatefulWidget {
     this.initialBook,
     this.openTraceId,
     this.openStartedAtMicros,
+    this.autoStartFloatingPlayback = false,
+    this.popAfterAutoStart = false,
+    this.hiddenForAutoStart = false,
   });
 
   @override
@@ -461,6 +467,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   bool _didLogFirstFrame = false;
   bool _didLogTxtContentFrame = false;
+  bool _didAutoStartFloatingPlayback = false;
 
   void _logOpenTrace(String message) {
     final traceId = widget.openTraceId;
@@ -519,7 +526,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         return true;
       },
       child: Scaffold(
-        backgroundColor: _readerBgColor,
+        backgroundColor: widget.hiddenForAutoStart
+            ? Colors.transparent
+            : _readerBgColor,
         body: bookAsync.when(
           data: (book) => _buildReader(book ?? widget.initialBook),
           loading: () => widget.initialBook != null
@@ -925,6 +934,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final ttsState = ref.watch(ttsProvider);
     final totalPages = _resolveTotalPages(book);
 
+    if (widget.autoStartFloatingPlayback && !_didAutoStartFloatingPlayback) {
+      _didAutoStartFloatingPlayback = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) {
+          return;
+        }
+        await _startFloatingPlayback(book: book, totalPages: totalPages);
+        if (widget.popAfterAutoStart && mounted) {
+          Navigator.of(context).pop();
+        }
+      });
+    }
+
     final readerContent = Stack(
       children: [
         Positioned.fill(child: _buildReaderBackgroundLayer()),
@@ -1012,7 +1034,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       ], // 最外层 Stack children 闭合
     ); // 最外层 Stack 闭合
 
-    return readerContent;
+    if (!widget.hiddenForAutoStart) {
+      return readerContent;
+    }
+
+    return IgnorePointer(child: Opacity(opacity: 0, child: readerContent));
   }
 
   Widget _buildOpeningView(Book book) {
