@@ -81,70 +81,6 @@ class _DecodedTxtContent {
   const _DecodedTxtContent({required this.text, required this.encoding});
 }
 
-@immutable
-class TxtEdgePagingResolution {
-  final double overscroll;
-  final bool triggerLatched;
-  final bool shouldPage;
-  final bool previous;
-
-  const TxtEdgePagingResolution({
-    required this.overscroll,
-    required this.triggerLatched,
-    required this.shouldPage,
-    required this.previous,
-  });
-}
-
-@visibleForTesting
-TxtEdgePagingResolution resolveTxtEdgeOverscroll({
-  required double accumulatedOverscroll,
-  required bool triggerLatched,
-  required bool hasTxtPages,
-  required bool hasTxtChapters,
-  required int currentPage,
-  required int totalPages,
-  required double overscroll,
-  double threshold = 16,
-}) {
-  if (!hasTxtPages || !hasTxtChapters || triggerLatched) {
-    return TxtEdgePagingResolution(
-      overscroll: accumulatedOverscroll,
-      triggerLatched: triggerLatched,
-      shouldPage: false,
-      previous: false,
-    );
-  }
-
-  final atLeadingEdge = currentPage <= 0 && overscroll < 0;
-  final atTrailingEdge = currentPage >= totalPages - 1 && overscroll > 0;
-  if (!atLeadingEdge && !atTrailingEdge) {
-    return const TxtEdgePagingResolution(
-      overscroll: 0,
-      triggerLatched: false,
-      shouldPage: false,
-      previous: false,
-    );
-  }
-
-  final nextOverscroll = accumulatedOverscroll + overscroll;
-  if (nextOverscroll.abs() < threshold) {
-    return TxtEdgePagingResolution(
-      overscroll: nextOverscroll,
-      triggerLatched: false,
-      shouldPage: false,
-      previous: atLeadingEdge,
-    );
-  }
-
-  return TxtEdgePagingResolution(
-    overscroll: 0,
-    triggerLatched: true,
-    shouldPage: true,
-    previous: atLeadingEdge,
-  );
-}
-
 class _TocEntry {
   final String title;
   final int pageIndex;
@@ -470,7 +406,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       'reader_background_blur_sigma_v1';
   static const String _prefBackgroundBrightness =
       'reader_background_brightness_v1';
-  static const bool _enablePageCountMode = false;
   // 禁用 keepPage 以避免 page storage 延迟
   late PageController _pageController;
   final int _fallbackPages = 100;
@@ -493,17 +428,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   List<_TocEntry> _txtToc = const [];
   _TxtLocation? _currentTxtLocation;
   bool _showTxtOpeningView = false;
-  int _paginationSignature = -1;
-  bool _isRepaginating = false;
-  bool _repaginateScheduled = false;
-  int _paginationJobId = 0;
-  final Map<String, List<_TxtPage>> _txtPageCache = {};
-  bool _isUserPaging = false;
   bool _isAdjustingTxtPageStream = false;
-  Completer<void>? _pagingIdleCompleter;
   int? _lastPageTurnStart; // 用于追踪翻页延迟
-  double _txtEdgeOverscroll = 0;
-  bool _txtEdgePagingTriggered = false;
 
   Timer? _progressSaveDebounce;
   Timer? _repaginateDebounce;
@@ -998,12 +924,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     final ttsState = ref.watch(ttsProvider);
     final totalPages = _resolveTotalPages(book);
-    if (_enablePageCountMode &&
-        _isTxtBook(book) &&
-        _txtChapters.isNotEmpty &&
-        _txtPages.isNotEmpty) {
-      _ensureTxtPagination();
-    }
 
     final readerContent = Stack(
       children: [
@@ -3553,10 +3473,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  void _handleTxtEdgePaging({required bool previous}) {
-    _turnTxtPage(forward: !previous, book: null);
-  }
-
   void _jumpToPage(int page, {int? tapStart, int? computeStart}) {
     final jumpStart = DateTime.now().microsecondsSinceEpoch;
     final currentPageBefore = _pageController.hasClients
@@ -3651,136 +3567,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ScrollNotification notification,
     int totalPages,
   ) {
-    if (notification is ScrollStartNotification) {
-      _txtEdgeOverscroll = 0;
-      _txtEdgePagingTriggered = false;
-      _setUserPaging(true);
-      return false;
-    }
-
-    if (notification is ScrollUpdateNotification) {
-      _handleTxtEdgeDragPaging(notification, totalPages);
-      return false;
-    }
-
-    if (notification is OverscrollNotification) {
-      _handleTxtOverscrollPaging(notification, totalPages);
-      return false;
-    }
-
-    if (notification is ScrollEndNotification) {
-      _txtEdgeOverscroll = 0;
-      _txtEdgePagingTriggered = false;
-      _setUserPaging(false);
-    }
-
     return false;
-  }
-
-  void _handleTxtEdgeDragPaging(
-    ScrollUpdateNotification notification,
-    int totalPages,
-  ) {
-    if (_txtPages.isNotEmpty) {
-      return;
-    }
-    if (notification.metrics.axis != Axis.horizontal) {
-      return;
-    }
-    if (notification.dragDetails == null) {
-      return;
-    }
-    final scrollDelta = notification.scrollDelta;
-    if (scrollDelta == null || scrollDelta == 0) {
-      return;
-    }
-    final dragDx = notification.dragDetails?.delta.dx;
-    if (dragDx == null || dragDx == 0) {
-      return;
-    }
-
-    const edgeTolerance = 0.5;
-    final atLeadingEdge = notification.metrics.extentBefore <= edgeTolerance;
-    final atTrailingEdge = notification.metrics.extentAfter <= edgeTolerance;
-    if (!atLeadingEdge && !atTrailingEdge) {
-      return;
-    }
-
-    double? normalizedOverscroll;
-    if (atLeadingEdge && dragDx > 0) {
-      normalizedOverscroll = -scrollDelta.abs();
-    } else if (atTrailingEdge && dragDx < 0) {
-      normalizedOverscroll = scrollDelta.abs();
-    } else {
-      _txtEdgeOverscroll = 0;
-      _txtEdgePagingTriggered = false;
-      return;
-    }
-
-    final resolution = resolveTxtEdgeOverscroll(
-      accumulatedOverscroll: _txtEdgeOverscroll,
-      triggerLatched: _txtEdgePagingTriggered,
-      hasTxtPages: _txtPages.isNotEmpty,
-      hasTxtChapters: _txtChapters.isNotEmpty,
-      currentPage: _currentPage,
-      totalPages: totalPages,
-      overscroll: normalizedOverscroll,
-    );
-    _txtEdgeOverscroll = resolution.overscroll;
-    _txtEdgePagingTriggered = resolution.triggerLatched;
-    if (resolution.shouldPage) {
-      _handleTxtEdgePaging(previous: resolution.previous);
-    }
-  }
-
-  void _handleTxtOverscrollPaging(
-    OverscrollNotification notification,
-    int totalPages,
-  ) {
-    if (_txtPages.isNotEmpty) {
-      return;
-    }
-    if (notification.metrics.axis != Axis.horizontal) {
-      return;
-    }
-
-    final resolution = resolveTxtEdgeOverscroll(
-      accumulatedOverscroll: _txtEdgeOverscroll,
-      triggerLatched: _txtEdgePagingTriggered,
-      hasTxtPages: _txtPages.isNotEmpty,
-      hasTxtChapters: _txtChapters.isNotEmpty,
-      currentPage: _currentPage,
-      totalPages: totalPages,
-      overscroll: notification.overscroll,
-    );
-    _txtEdgeOverscroll = resolution.overscroll;
-    _txtEdgePagingTriggered = resolution.triggerLatched;
-    if (resolution.shouldPage) {
-      _handleTxtEdgePaging(previous: resolution.previous);
-    }
-  }
-
-  void _setUserPaging(bool paging) {
-    if (_isUserPaging == paging) {
-      print('⚠️  _setUserPaging: 状态已经是 $paging，跳过设置');
-      return;
-    }
-    print('🔄 _setUserPaging: 从 $_isUserPaging 改变为 $paging');
-    _isUserPaging = paging;
-    if (!paging) {
-      _pagingIdleCompleter?.complete();
-      _pagingIdleCompleter = null;
-    } else {
-      _pagingIdleCompleter ??= Completer<void>();
-    }
-  }
-
-  Future<void> _waitForPagingIdle() async {
-    if (!_isUserPaging) {
-      return;
-    }
-    _pagingIdleCompleter ??= Completer<void>();
-    await _pagingIdleCompleter!.future;
   }
 
   void _restorePageAfterBuild(int page, {int retries = 8}) {
@@ -3941,7 +3728,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _currentTxtLocation = initialLocation;
         _loadedTxtPath = book.epubPath;
         _currentPage = initialPageIndex;
-        _paginationSignature = -1;
         _isLoadingTxt = false;
         _showTxtOpeningView = false;
         _txtLoadScheduled = false;
@@ -3949,7 +3735,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _logOpenTrace('txt reader state committed');
 
       _txtOpeningViewDelayTimer?.cancel();
-      _txtPageCache.clear();
       _logOpenTrace(
         'txt load ready from location, chapter=${initialLocation.chapterIndex}, offset=${initialLocation.offset}',
       );
@@ -4234,8 +4019,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _txtToc = _buildTocFromChaptersForLocation(chapter.index);
       _currentTxtLocation = resolvedLocation;
       _currentPage = targetPage;
-      _txtEdgeOverscroll = 0;
-      _txtEdgePagingTriggered = false;
     });
 
     if (resetController) {
@@ -4243,285 +4026,49 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
   }
 
-  void _ensureTxtPagination() {
-    final signature = _buildPaginationSignature();
-    if (signature == _paginationSignature ||
-        _isRepaginating ||
-        _repaginateScheduled) {
-      return;
-    }
-    _scheduleRepaginate(immediate: true);
-  }
-
-  int _buildPaginationSignature() {
-    final media = MediaQuery.of(context);
-    return Object.hash(
-      media.size.width.round(),
-      media.size.height.round(),
-      media.padding.top.round(),
-      media.padding.bottom.round(),
-      _fontSizePreset,
-      _paddingPreset,
-      _lineHeightPreset,
-      _paragraphIndentEnabled,
-      _fontStylePreset,
-    );
-  }
-
-  void _scheduleRepaginate({String? anchorLocation, bool immediate = false}) {
-    if (_txtChapters.isEmpty) {
+  void _scheduleRepaginate({bool immediate = false}) {
+    if (_txtChapters.isEmpty || _currentTxtLocation == null) {
       return;
     }
     _repaginateDebounce?.cancel();
-    _repaginateScheduled = true;
     _repaginateDebounce = Timer(
-      Duration(milliseconds: immediate ? 0 : 800),
+      Duration(milliseconds: immediate ? 0 : 120),
       () {
         if (!mounted) {
-          _repaginateScheduled = false;
           return;
         }
-        _repaginateTxtPages(anchorLocation: anchorLocation);
+        _repaginateVisibleTxtPages();
       },
     );
   }
 
-  Future<void> _repaginateTxtPages({String? anchorLocation}) async {
-    if (_isRepaginating || _txtChapters.isEmpty) {
-      _repaginateScheduled = false;
+  void _repaginateVisibleTxtPages() {
+    final location = _currentTxtLocation;
+    if (location == null ||
+        _txtChapters.isEmpty ||
+        _txtChapterByIndex.isEmpty) {
       return;
     }
-    final signature = _buildPaginationSignature();
-    final width = _contentMaxWidth;
-    final height = _contentMaxHeight;
-    if (width <= 1 || height <= 1) {
-      _repaginateScheduled = false;
+    final pages = _buildTxtPageWindowForLocation(location: location);
+    if (pages.isEmpty) {
       return;
     }
-
-    final location = anchorLocation ?? _locationForPage(_currentPage);
-    final cacheKey = _buildPaginationCacheKey(signature);
-    final cachedPages = _txtPageCache[cacheKey];
-    if (cachedPages != null && cachedPages.isNotEmpty) {
-      final restoredPage = _resolvePageFromLocation(location, cachedPages);
-      if (!mounted) {
-        _repaginateScheduled = false;
-        return;
-      }
-      setState(() {
-        _txtPages = cachedPages;
-        _txtToc = _buildTocFromPages(cachedPages);
-        _paginationSignature = signature;
-        _currentPage = restoredPage;
-      });
-      _repaginateScheduled = false;
-      _restorePageAfterBuild(restoredPage);
-      return;
-    }
-
-    final jobId = ++_paginationJobId;
-    _isRepaginating = true;
-    final pages = await _paginateTxtPagesProgressive(
-      width: width,
-      height: height,
-      jobId: jobId,
+    final restoredPage = _resolvePageFromLocation(
+      'txt:${location.chapterIndex}:${location.offset}',
+      pages,
     );
-    if (jobId != _paginationJobId) {
-      _isRepaginating = false;
-      _repaginateScheduled = false;
+    final currentChapter = _txtChapterByIndex[location.chapterIndex];
+    if (currentChapter == null) {
       return;
     }
-    final toc = _buildTocFromPages(pages);
-    final restoredPage = _resolvePageFromLocation(location, pages);
-    _isRepaginating = false;
-    _repaginateScheduled = false;
-    _txtPageCache[cacheKey] = List<_TxtPage>.unmodifiable(pages);
-    await _writePersistedPagination(
-      bookId: widget.bookId,
-      signature: signature,
-      pages: pages,
-    );
-
-    if (!mounted) {
-      return;
-    }
-
+    _replacePageController(restoredPage);
     setState(() {
-      _txtPages = pages;
-      _txtToc = toc;
-      _paginationSignature = signature;
+      _txtPages = List<_TxtPage>.unmodifiable(pages);
+      _txtToc = _buildTocFromChaptersForLocation(currentChapter.index);
       _currentPage = restoredPage;
+      _currentTxtLocation = location;
     });
     _restorePageAfterBuild(restoredPage);
-  }
-
-  String _buildPaginationCacheKey(int signature) {
-    final path = _loadedTxtPath ?? widget.bookId;
-    return '$path::$signature';
-  }
-
-  Future<String> _paginationCachePath({
-    required String bookId,
-    required int signature,
-  }) async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final dir = Directory('${appDir.path}/pagination_cache');
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    return '${dir.path}/${bookId}_$signature.json';
-  }
-
-  // ignore: unused_element
-  Future<List<_TxtPage>?> _readPersistedPagination({
-    required String bookId,
-    required int signature,
-    required Map<int, _TxtChapter> chapterByIndex,
-  }) async {
-    try {
-      final path = await _paginationCachePath(
-        bookId: bookId,
-        signature: signature,
-      );
-      final file = File(path);
-      if (!await file.exists()) {
-        return null;
-      }
-      final raw = await file.readAsString();
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) {
-        return null;
-      }
-      final pages = decoded['pages'];
-      if (pages is! List) {
-        return null;
-      }
-      final parsed = <_TxtPage>[];
-      for (final entry in pages) {
-        if (entry is! Map<String, dynamic>) {
-          continue;
-        }
-        final chapterIndex = entry['chapterIndex'];
-        final startOffset = entry['startOffset'];
-        final endOffset = entry['endOffset'];
-        final title = entry['title'];
-        if (chapterIndex is! int ||
-            startOffset is! int ||
-            endOffset is! int ||
-            title is! String) {
-          continue;
-        }
-        final chapter = chapterByIndex[chapterIndex];
-        if (chapter == null) {
-          continue;
-        }
-        if (startOffset < 0 ||
-            endOffset <= startOffset ||
-            endOffset > chapter.content.length) {
-          continue;
-        }
-        parsed.add(
-          _TxtPage(
-            title: title,
-            chapterIndex: chapterIndex,
-            startOffset: startOffset,
-            endOffset: endOffset,
-          ),
-        );
-      }
-      if (parsed.isEmpty) {
-        return null;
-      }
-      return parsed;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _writePersistedPagination({
-    required String bookId,
-    required int signature,
-    required List<_TxtPage> pages,
-  }) async {
-    try {
-      final path = await _paginationCachePath(
-        bookId: bookId,
-        signature: signature,
-      );
-      final file = File(path);
-      final payload = {
-        'version': 1,
-        'signature': signature,
-        'savedAt': DateTime.now().millisecondsSinceEpoch,
-        'pages': pages
-            .map(
-              (page) => {
-                'title': page.title,
-                'chapterIndex': page.chapterIndex,
-                'startOffset': page.startOffset,
-                'endOffset': page.endOffset,
-              },
-            )
-            .toList(),
-      };
-      await file.writeAsString(jsonEncode(payload), flush: true);
-    } catch (_) {
-      // Ignore cache write failures, reading experience should continue normally.
-    }
-  }
-
-  Future<List<_TxtPage>> _paginateTxtPagesProgressive({
-    required double width,
-    required double height,
-    required int jobId,
-  }) async {
-    final chapters = List<_TxtChapter>.from(_txtChapters);
-    final allPages = <_TxtPage>[];
-
-    // Keep UI responsive: yield frequently and pause pagination while the user is paging.
-    for (var i = 0; i < chapters.length; i++) {
-      if (jobId != _paginationJobId) {
-        return allPages;
-      }
-      await _waitForPagingIdle();
-
-      final chapterPages = await _paginateSingleChapterAsync(
-        chapter: chapters[i],
-        width: width,
-        height: height,
-        jobId: jobId,
-      );
-      allPages.addAll(chapterPages);
-
-      if (i % 1 == 0) {
-        await Future<void>.delayed(Duration.zero);
-      }
-    }
-
-    if (allPages.isEmpty) {
-      return const [
-        _TxtPage(title: '正文', chapterIndex: 0, startOffset: 0, endOffset: 0),
-      ];
-    }
-    if (kDebugMode) {
-      _validatePageContinuity(allPages);
-    }
-    return allPages;
-  }
-
-  void _validatePageContinuity(List<_TxtPage> pages) {
-    for (var i = 0; i < pages.length - 1; i++) {
-      final current = pages[i];
-      final next = pages[i + 1];
-      if (current.chapterIndex != next.chapterIndex) {
-        continue;
-      }
-      final currentEnd = current.endOffset;
-      assert(
-        currentEnd == next.startOffset,
-        'TXT pagination gap/overlap at page $i',
-      );
-    }
   }
 
   TextStyle _paginationTextStyle() {
@@ -4850,51 +4397,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     leading: 0,
   );
 
-  Future<List<_TxtPage>> _paginateSingleChapterAsync({
-    required _TxtChapter chapter,
-    required double width,
-    required double height,
-    required int jobId,
-  }) async {
-    final text = chapter.content;
-    if (text.isEmpty) {
-      return const [];
-    }
-
-    final style = _paginationTextStyle();
-    final pages = <_TxtPage>[];
-    var start = 0;
-    while (start < text.length) {
-      if (jobId != _paginationJobId) {
-        return pages;
-      }
-      await _waitForPagingIdle();
-
-      final end = _pageEndForText(
-        text: text,
-        start: start,
-        width: width,
-        height: height,
-        style: style,
-        chapterTitle: chapter.title,
-      );
-      pages.add(
-        _TxtPage(
-          title: chapter.title,
-          chapterIndex: chapter.index,
-          startOffset: start,
-          endOffset: end,
-        ),
-      );
-      start = end;
-
-      if (pages.length % 2 == 0) {
-        await Future<void>.delayed(Duration.zero);
-      }
-    }
-    return pages;
-  }
-
   int _pageEndForText({
     required String text,
     required int start,
@@ -5011,126 +4513,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return estimate.clamp(120, 2200);
   }
 
-  // ignore: unused_element
-  List<_TxtPage> _buildQuickPagesFromLocation({
-    required List<_TxtChapter> chapters,
-    required Map<int, _TxtChapter> chapterByIndex,
-    required String? location,
-  }) {
-    if (chapters.isEmpty || chapterByIndex.isEmpty) {
-      return const [
-        _TxtPage(title: '正文', chapterIndex: 0, startOffset: 0, endOffset: 0),
-      ];
-    }
-
-    var chapterIndex = chapters.first.index;
-    var startOffset = 0;
-    if (location != null && location.startsWith('txt:')) {
-      final parts = location.split(':');
-      if (parts.length >= 3) {
-        chapterIndex = int.tryParse(parts[1]) ?? chapterIndex;
-        startOffset = int.tryParse(parts[2]) ?? 0;
-      }
-    }
-
-    final width = _contentMaxWidth;
-    final height = _contentMaxHeight;
-    final style = _paginationTextStyle();
-    final estimate = _estimateCharsPerPage(width: width, height: height);
-
-    final pages = <_TxtPage>[];
-    const maxQuickPages = 40;
-    const maxBackPages = 8;
-    final chapterPos = max(
-      0,
-      chapters.indexWhere((c) => c.index == chapterIndex),
-    );
-
-    if (chapterPos > 0) {
-      final prev = chapters[chapterPos - 1];
-      final prevText = prev.content;
-      final prevStart = max(0, prevText.length - estimate * 14);
-      final prevPages = <_TxtPage>[];
-      var start = prevStart;
-      while (start < prevText.length) {
-        final end = _pageEndForText(
-          text: prevText,
-          start: start,
-          width: width,
-          height: height,
-          style: style,
-          chapterTitle: prev.title,
-        );
-        prevPages.add(
-          _TxtPage(
-            title: prev.title,
-            chapterIndex: prev.index,
-            startOffset: start,
-            endOffset: end,
-          ),
-        );
-        start = end;
-      }
-      if (prevPages.length > maxBackPages) {
-        pages.addAll(prevPages.sublist(prevPages.length - maxBackPages));
-      } else {
-        pages.addAll(prevPages);
-      }
-    }
-
-    for (
-      var c = chapterPos;
-      c < chapters.length && pages.length < maxQuickPages;
-      c++
-    ) {
-      final chapter = chapters[c];
-      final text = chapter.content;
-      final isAnchor = c == chapterPos;
-      var start = isAnchor
-          ? max(0, startOffset - estimate * 12).clamp(0, text.length)
-          : 0;
-
-      while (start < text.length && pages.length < maxQuickPages) {
-        final end = _pageEndForText(
-          text: text,
-          start: start,
-          width: width,
-          height: height,
-          style: style,
-          chapterTitle: chapter.title,
-        );
-        pages.add(
-          _TxtPage(
-            title: chapter.title,
-            chapterIndex: chapter.index,
-            startOffset: start,
-            endOffset: end,
-          ),
-        );
-        start = end;
-      }
-    }
-
-    if (pages.isEmpty) {
-      return const [
-        _TxtPage(title: '正文', chapterIndex: 0, startOffset: 0, endOffset: 0),
-      ];
-    }
-    return pages;
-  }
-
-  List<_TocEntry> _buildTocFromPages(List<_TxtPage> pages) {
-    final seen = <int>{};
-    final toc = <_TocEntry>[];
-    for (var i = 0; i < pages.length; i++) {
-      final chapterIndex = pages[i].chapterIndex;
-      if (seen.add(chapterIndex)) {
-        toc.add(_TocEntry(title: pages[i].title, pageIndex: i));
-      }
-    }
-    return toc;
-  }
-
   int _resolvePageFromLocation(String? location, List<_TxtPage> pages) {
     if (pages.isEmpty) {
       return 0;
@@ -5180,15 +4562,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
     }
     return 0;
-  }
-
-  String _locationForPage(int pageIndex) {
-    if (_txtPages.isEmpty) {
-      return 'txtp:0';
-    }
-    final safeIndex = pageIndex.clamp(0, _txtPages.length - 1);
-    final page = _txtPages[safeIndex];
-    return 'txt:${page.chapterIndex}:${page.startOffset}';
   }
 
   double get _currentProgressPercent {
