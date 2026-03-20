@@ -1,105 +1,87 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
+import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_card_widget.dart';
 
 class BookshelfGridWidget extends ConsumerWidget {
+  final List<Book> books;
+  final Map<String, ReadingProgress> progressByBookId;
+  final Set<String> selectedBookIds;
+  final bool selectionMode;
   final Function(Book)? onBookTap;
   final Function(Book)? onBookLongPress;
   final double spacing;
 
   const BookshelfGridWidget({
     super.key,
+    required this.books,
+    required this.progressByBookId,
+    required this.selectedBookIds,
+    required this.selectionMode,
     this.onBookTap,
     this.onBookLongPress,
-    this.spacing = 16,
+    this.spacing = 20,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final booksState = ref.watch(booksProvider);
+    final theme = ref.watch(currentThemeProvider);
 
-    if (booksState.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (booksState.error != null) {
-      final theme = ref.watch(currentThemeProvider);
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 48,
-              color: theme.secondaryTextColor,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Failed to load books',
-              style: TextStyle(color: theme.secondaryTextColor),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: () {
-                ref.read(booksProvider.notifier).loadBooks();
-              },
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (booksState.books.isEmpty) {
-      final theme = ref.watch(currentThemeProvider);
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.library_books_outlined,
-              size: 64,
-              color: theme.secondaryTextColor,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No books yet',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+    if (books.isEmpty) {
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.library_books_outlined,
+                size: 64,
                 color: theme.secondaryTextColor,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tap + to add your first book',
-              style: TextStyle(color: theme.secondaryTextColor),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'No books yet',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: theme.secondaryTextColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tap + to add your first book',
+                style: TextStyle(color: theme.secondaryTextColor),
+              ),
+            ],
+          ),
         ),
       );
     }
 
-    return GridView.builder(
-      padding: EdgeInsets.all(spacing),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 0.55,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 24,
+    return SliverPadding(
+      padding: EdgeInsets.fromLTRB(spacing, 0, spacing, spacing),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          childAspectRatio: 0.61,
+          crossAxisSpacing: 13,
+          mainAxisSpacing: 16,
+        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final book = books[index];
+          return BookCardWidget(
+            book: book,
+            progress: progressByBookId[book.id]?.percentage,
+            isSelected: selectedBookIds.contains(book.id),
+            selectionMode: selectionMode,
+            onTap: () => onBookTap?.call(book),
+            onLongPress: () => onBookLongPress?.call(book),
+          );
+        }, childCount: books.length),
       ),
-      itemCount: booksState.books.length,
-      itemBuilder: (context, index) {
-        final book = booksState.books[index];
-        return BookCardWidget(
-          book: book,
-          onTap: () => onBookTap?.call(book),
-          onLongPress: () => onBookLongPress?.call(book),
-        );
-      },
     );
   }
 }
