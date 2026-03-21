@@ -10,7 +10,8 @@ class BookCardWidget extends ConsumerWidget {
   final bool isSelected;
   final bool selectionMode;
   final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
+  final ValueChanged<LongPressStartDetails>? onLongPressStart;
+  final ValueChanged<TapDownDetails>? onSecondaryTapDown;
 
   const BookCardWidget({
     super.key,
@@ -19,7 +20,8 @@ class BookCardWidget extends ConsumerWidget {
     this.isSelected = false,
     this.selectionMode = false,
     this.onTap,
-    this.onLongPress,
+    this.onLongPressStart,
+    this.onSecondaryTapDown,
   });
 
   @override
@@ -29,7 +31,8 @@ class BookCardWidget extends ConsumerWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      onLongPress: onLongPress,
+      onLongPressStart: onLongPressStart,
+      onSecondaryTapDown: onSecondaryTapDown,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

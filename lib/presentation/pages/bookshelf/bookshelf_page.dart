@@ -1,11 +1,15 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:charset_converter/charset_converter.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:myreader/core/constants/placeholder_cover_assets.dart';
 import 'package:myreader/core/models/app_theme_data.dart';
@@ -21,6 +25,7 @@ import 'package:myreader/domain/entities/category.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/flureadium_integration/epub_parser.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
+import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:myreader/presentation/widgets/bookshelf/bookshelf_grid_widget.dart';
 
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -30,13 +35,17 @@ class BookshelfPage extends ConsumerStatefulWidget {
   ConsumerState<BookshelfPage> createState() => _BookshelfPageState();
 }
 
-class _BookshelfPageState extends ConsumerState<BookshelfPage> {
+class _BookshelfPageState extends ConsumerState<BookshelfPage>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final TxtImportCacheService _txtImportCacheService =
       const TxtImportCacheService();
   bool _isSearching = false;
   bool _isSelectionMode = false;
   final Set<String> _selectedBookIds = <String>{};
+  OverlayEntry? _topNoticeEntry;
+  AnimationController? _topNoticeController;
+  Timer? _topNoticeTimer;
 
   void _logOpenTrace(String traceId, int startedAtMicros, String message) {
     final elapsedMs =
@@ -59,6 +68,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
   @override
   void dispose() {
+    _topNoticeTimer?.cancel();
+    _topNoticeController?.dispose();
+    _topNoticeEntry?.remove();
     _searchController.dispose();
     super.dispose();
   }
@@ -271,7 +283,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                     selectedBookIds: _selectedBookIds,
                     selectionMode: _isSelectionMode,
                     onBookTap: _handleBookTap,
-                    onBookLongPress: _handleBookLongPress,
+                    onBookMenuRequest: _handleBookMenuRequest,
                   ),
               ],
             ),
@@ -331,15 +343,53 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     _openReader(book);
   }
 
-  void _handleBookLongPress(Book book) {
-    if (_isSelectionMode) {
-      _toggleBookSelection(book.id);
+  Future<void> _handleBookMenuRequest(Book book, Offset globalPosition) async {
+    if (_isSelectionMode || !mounted) {
       return;
     }
-    setState(() {
-      _isSelectionMode = true;
-      _selectedBookIds.add(book.id);
-    });
+    final action = await showGeneralDialog<_BookQuickAction>(
+      context: context,
+      barrierLabel: 'Book context menu',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.08),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (_, __, ___) => _BookContextMenuPopup(
+        book: book,
+        anchor: globalPosition,
+        theme: ref.read(currentThemeProvider),
+      ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+
+    switch (action) {
+      case _BookQuickAction.details:
+        await _showBookDetailsSheet(book);
+        break;
+      case _BookQuickAction.changeCover:
+        await _changeBookCover(book);
+        break;
+      case _BookQuickAction.delete:
+        await _confirmDeleteBook(book);
+        break;
+      case _BookQuickAction.stats:
+        await _showReadingStatsSheet(book);
+        break;
+      case null:
+        break;
+    }
   }
 
   void _toggleBookSelection(String bookId) {
@@ -401,6 +451,36 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       _selectedBookIds.clear();
       _isSelectionMode = false;
     });
+    ref.invalidate(allReadingProgressProvider);
+  }
+
+  Future<void> _confirmDeleteBook(Book book) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除书籍'),
+        content: Text('确认删除《${book.title}》吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) {
+      return;
+    }
+
+    await _deleteBookAndAssets(book.id);
+    if (!mounted) {
+      return;
+    }
     ref.invalidate(allReadingProgressProvider);
   }
 
@@ -555,8 +635,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       _selectedBookIds.clear();
       _isSelectionMode = false;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(categoryId == null ? '已移出分类' : '已更新书籍分类')),
+    _showTopNotice(
+      message: categoryId == null ? '已移出分类' : '已更新书籍分类',
+      kind: _TopNoticeKind.success,
     );
   }
 
@@ -696,6 +777,242 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     ref.invalidate(allReadingProgressProvider);
   }
 
+  Future<void> _showBookDetailsSheet(Book book) async {
+    final theme = ref.read(currentThemeProvider);
+    final categories = ref.read(categoriesProvider).categories;
+    final categoryName = _categoryNameForBook(book, categories);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: theme.cardBackgroundColor,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: SizedBox(
+                      width: 76,
+                      height: 104,
+                      child: _CurrentlyReadingCover(book: book),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          book.title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          book.author?.trim().isNotEmpty == true
+                              ? book.author!
+                              : '未知作者',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: theme.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _BookMetaRow(label: '分类', value: categoryName),
+              _BookMetaRow(
+                label: '总页数',
+                value: book.totalPages?.toString() ?? '未知',
+              ),
+              _BookMetaRow(
+                label: '文件大小',
+                value: _formatFileSize(book.fileSize),
+              ),
+              _BookMetaRow(
+                label: '导入时间',
+                value: _formatDateTime(book.importedAt),
+              ),
+              _BookMetaRow(
+                label: '最近阅读',
+                value: book.lastReadAt == null
+                    ? '未开始'
+                    : _formatDateTime(book.lastReadAt!),
+              ),
+              _BookMetaRow(label: '文件路径', value: book.epubPath, maxLines: 2),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showReadingStatsSheet(Book book) async {
+    final theme = ref.read(currentThemeProvider);
+    final progress = ref.read(allReadingProgressProvider).valueOrNull?[book.id];
+    final getNotesByBookId = ref.read(getNotesByBookIdUseCaseProvider);
+    final getBookmarksByBookId = ref.read(getBookmarksByBookIdUseCaseProvider);
+    final notes = await getNotesByBookId(book.id);
+    final bookmarks = await getBookmarksByBookId(book.id);
+
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: theme.cardBackgroundColor,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '阅读统计',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: theme.textColor,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _BookStatRow(
+                label: '阅读进度',
+                value: '${(((progress?.percentage ?? 0) * 100)).round()}%',
+              ),
+              _BookStatRow(
+                label: '阅读时长',
+                value: _formatReadingDuration(
+                  progress?.readingTimeSeconds ?? 0,
+                ),
+              ),
+              _BookStatRow(
+                label: '最近阅读',
+                value: progress == null
+                    ? '暂无记录'
+                    : _formatDateTime(progress.lastReadAt),
+              ),
+              _BookStatRow(
+                label: '阅读位置',
+                value: progress?.location.trim().isNotEmpty == true
+                    ? progress!.location
+                    : '暂无记录',
+                maxLines: 2,
+              ),
+              _BookStatRow(label: '书签数量', value: '${bookmarks.length}'),
+              _BookStatRow(label: '笔记数量', value: '${notes.length}'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _changeBookCover(Book book) async {
+    try {
+      String? pickedPath;
+      if (Platform.isIOS || Platform.isAndroid) {
+        final picker = ImagePicker();
+        final image = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1600,
+          imageQuality: 92,
+        );
+        pickedPath = image?.path;
+      } else {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: false,
+          withData: false,
+        );
+        if (result != null && result.files.isNotEmpty) {
+          pickedPath = result.files.first.path;
+        }
+      }
+
+      if (pickedPath == null || pickedPath.isEmpty) {
+        return;
+      }
+
+      final sourceFile = File(pickedPath);
+      if (!await sourceFile.exists()) {
+        throw Exception('图片文件不存在');
+      }
+
+      final appDir = await getApplicationDocumentsDirectory();
+      final coversDir = Directory('${appDir.path}/covers');
+      if (!await coversDir.exists()) {
+        await coversDir.create(recursive: true);
+      }
+
+      final extension = pickedPath.contains('.')
+          ? pickedPath.split('.').last.toLowerCase()
+          : 'jpg';
+      final targetPath =
+          '${coversDir.path}/custom_cover_${book.id}_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      final copiedFile = await sourceFile.copy(targetPath);
+      await FileImage(copiedFile).evict();
+
+      await _updateBook(book, coverPath: copiedFile.path);
+
+      final previousCoverPath = book.coverPath;
+      if (previousCoverPath != null && previousCoverPath != copiedFile.path) {
+        await _deleteManagedFile(
+          previousCoverPath,
+          managedFolderName: 'covers',
+        );
+      }
+
+      if (!mounted) {
+        return;
+      }
+      _showTopNotice(message: '封面已更新', kind: _TopNoticeKind.success);
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      _showTopNotice(message: '修改封面失败: $e', kind: _TopNoticeKind.error);
+    }
+  }
+
+  Future<void> _updateBook(
+    Book source, {
+    String? coverPath,
+    String? categoryId,
+  }) async {
+    final updateBook = ref.read(updateBookUseCaseProvider);
+    await updateBook(
+      Book(
+        id: source.id,
+        title: source.title,
+        author: source.author,
+        coverPath: coverPath ?? source.coverPath,
+        epubPath: source.epubPath,
+        totalPages: source.totalPages,
+        fileSize: source.fileSize,
+        importedAt: source.importedAt,
+        lastReadAt: source.lastReadAt,
+        categoryId: categoryId ?? source.categoryId,
+      ),
+    );
+    await ref.read(booksProvider.notifier).loadBooks();
+  }
+
   Future<void> _deleteBookAndAssets(String bookId) async {
     final books = ref.read(booksProvider).books;
     Book? book;
@@ -713,9 +1030,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       await ref.read(booksProvider.notifier).deleteBook(bookId);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除书籍失败: $e')));
+        _showTopNotice(message: '删除书籍失败: $e', kind: _TopNoticeKind.error);
       }
     }
   }
@@ -790,9 +1105,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       // Filter to only accept EPUB and TXT files
       if (fileExt != 'epub' && fileExt != 'txt') {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select an EPUB or TXT file')),
-        );
+        _showTopNotice(message: '请选择 EPUB 或 TXT 文件', kind: _TopNoticeKind.info);
         return;
       }
 
@@ -877,15 +1190,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Imported: ${book.title}')));
+      _showTopNotice(
+        message: '已导入《${book.title}》',
+        kind: _TopNoticeKind.success,
+      );
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to import: $e')));
+      _showTopNotice(message: '导入失败: $e', kind: _TopNoticeKind.error);
     }
   }
 
@@ -1028,6 +1340,116 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     ];
     return colors[colorIndex.abs() % colors.length];
   }
+
+  String _categoryNameForBook(Book book, List<Category> categories) {
+    final categoryId = book.categoryId;
+    if (categoryId == null || categoryId.isEmpty) {
+      return '未分类';
+    }
+    for (final category in categories) {
+      if (category.id == categoryId) {
+        return category.name;
+      }
+    }
+    return '未分类';
+  }
+
+  String _formatDateTime(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day $hour:$minute';
+  }
+
+  String _formatFileSize(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    var value = bytes.toDouble();
+    var unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    final precision = unitIndex == 0 ? 0 : 1;
+    return '${value.toStringAsFixed(precision)} ${units[unitIndex]}';
+  }
+
+  String _formatReadingDuration(int seconds) {
+    if (seconds <= 0) {
+      return '0 分钟';
+    }
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    if (hours <= 0) {
+      return '$minutes 分钟';
+    }
+    if (minutes == 0) {
+      return '$hours 小时';
+    }
+    return '$hours 小时 $minutes 分钟';
+  }
+
+  void _showTopNotice({required String message, required _TopNoticeKind kind}) {
+    if (!mounted) {
+      return;
+    }
+
+    _topNoticeTimer?.cancel();
+
+    final existingController = _topNoticeController;
+    if (_topNoticeEntry != null && existingController != null) {
+      final previousEntry = _topNoticeEntry;
+      existingController.reverse().whenComplete(() {
+        previousEntry?.remove();
+        existingController.dispose();
+      });
+    }
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+      reverseDuration: const Duration(milliseconds: 220),
+    );
+    final curved = CurvedAnimation(
+      parent: controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _topNoticeController = controller;
+    final entry = OverlayEntry(
+      builder: (context) => _TopFloatingNotice(
+        message: message,
+        theme: ref.read(currentThemeProvider),
+        kind: kind,
+        animation: curved,
+        onDismiss: _hideTopNotice,
+      ),
+    );
+    _topNoticeEntry = entry;
+    Overlay.of(context, rootOverlay: true).insert(entry);
+    controller.forward();
+
+    _topNoticeTimer = Timer(const Duration(milliseconds: 2400), () {
+      _hideTopNotice();
+    });
+  }
+
+  void _hideTopNotice() {
+    _topNoticeTimer?.cancel();
+    final controller = _topNoticeController;
+    final entry = _topNoticeEntry;
+    if (controller == null || entry == null) {
+      return;
+    }
+
+    _topNoticeController = null;
+    _topNoticeEntry = null;
+    controller.reverse().whenComplete(() {
+      entry.remove();
+      controller.dispose();
+    });
+  }
 }
 
 class _DecodedTxtContent {
@@ -1048,6 +1470,10 @@ class _CategorySelectionResult {
     : categoryId = '',
       shouldCreate = true;
 }
+
+enum _BookQuickAction { details, changeCover, delete, stats }
+
+enum _TopNoticeKind { success, error, info }
 
 class _CurrentlyReadingCard extends StatelessWidget {
   final Book book;
@@ -1326,4 +1752,467 @@ class _SelectionBar extends StatelessWidget {
       ),
     );
   }
+}
+
+class _BookContextMenuPopup extends StatelessWidget {
+  final Book book;
+  final Offset anchor;
+  final AppThemeData theme;
+
+  const _BookContextMenuPopup({
+    required this.book,
+    required this.anchor,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    const menuWidth = 236.0;
+    final safeTop = mediaQuery.padding.top + 12;
+    final safeLeft = 12.0;
+    final safeRight = mediaQuery.size.width - menuWidth - 12;
+    final left = anchor.dx.clamp(
+      safeLeft,
+      safeRight < safeLeft ? safeLeft : safeRight,
+    );
+    final top = (anchor.dy - 12).clamp(
+      safeTop,
+      mediaQuery.size.height - mediaQuery.padding.bottom - 260,
+    );
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.pop(context),
+          ),
+        ),
+        Positioned(
+          left: left.toDouble(),
+          top: top.toDouble(),
+          child: SizedBox(
+            width: menuWidth,
+            child: CupertinoPopupSurface(
+              blurSigma: 18,
+              isSurfacePainted: false,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: CupertinoDynamicColor.resolve(
+                    CupertinoColors.systemBackground.withOpacity(0.92),
+                    context,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: theme.dividerColor.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _BookContextMenuHeader(book: book, theme: theme),
+                    const _BookContextMenuDivider(),
+                    const _BookContextMenuAction(
+                      action: _BookQuickAction.details,
+                      icon: CupertinoIcons.info_circle,
+                      label: '书籍详情',
+                    ),
+                    const _BookContextMenuDivider(),
+                    const _BookContextMenuAction(
+                      action: _BookQuickAction.changeCover,
+                      icon: CupertinoIcons.photo,
+                      label: '修改封面',
+                    ),
+                    const _BookContextMenuDivider(),
+                    const _BookContextMenuAction(
+                      action: _BookQuickAction.stats,
+                      icon: CupertinoIcons.chart_bar,
+                      label: '阅读统计',
+                    ),
+                    const _BookContextMenuDivider(),
+                    const _BookContextMenuAction(
+                      action: _BookQuickAction.delete,
+                      icon: CupertinoIcons.delete,
+                      label: '删除',
+                      isDestructive: true,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BookContextMenuHeader extends StatelessWidget {
+  final Book book;
+  final AppThemeData theme;
+
+  const _BookContextMenuHeader({required this.book, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: 34,
+              height: 46,
+              child: BookCoverWidget(book: book, width: 34, height: 46),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              book.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: theme.textColor,
+                decoration: TextDecoration.none,
+                decorationColor: Colors.transparent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BookContextMenuAction extends StatelessWidget {
+  final _BookQuickAction action;
+  final IconData icon;
+  final String label;
+  final bool isDestructive;
+
+  const _BookContextMenuAction({
+    required this.action,
+    required this.icon,
+    required this.label,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDestructive
+        ? CupertinoColors.systemRed.resolveFrom(context)
+        : CupertinoColors.label.resolveFrom(context);
+
+    return CupertinoButton(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      minimumSize: Size.zero,
+      borderRadius: BorderRadius.zero,
+      onPressed: () => Navigator.pop(context, action),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(
+          decoration: TextDecoration.none,
+          decorationColor: Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  color: color,
+                  decoration: TextDecoration.none,
+                  decorationColor: Colors.transparent,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(icon, size: 18, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BookContextMenuDivider extends StatelessWidget {
+  const _BookContextMenuDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 0.5,
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      color: CupertinoColors.separator.resolveFrom(context),
+    );
+  }
+}
+
+class _BookMetaRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final int maxLines;
+
+  const _BookMetaRow({
+    required this.label,
+    required this.value,
+    this.maxLines = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BookStatRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final int maxLines;
+
+  const _BookStatRow({
+    required this.label,
+    required this.value,
+    this.maxLines = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopFloatingNotice extends StatelessWidget {
+  final String message;
+  final AppThemeData theme;
+  final _TopNoticeKind kind;
+  final Animation<double> animation;
+  final VoidCallback onDismiss;
+
+  const _TopFloatingNotice({
+    required this.message,
+    required this.theme,
+    required this.kind,
+    required this.animation,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final palette = _paletteForKind();
+
+    return IgnorePointer(
+      ignoring: false,
+      child: SafeArea(
+        bottom: false,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
+            child: AnimatedBuilder(
+              animation: animation,
+              builder: (context, child) {
+                final slideY = Tween<double>(
+                  begin: -30,
+                  end: 0,
+                ).evaluate(animation);
+                final scale = Tween<double>(
+                  begin: 0.92,
+                  end: 1,
+                ).evaluate(animation);
+                return Opacity(
+                  opacity: animation.value.clamp(0, 1),
+                  child: Transform.translate(
+                    offset: Offset(0, slideY),
+                    child: Transform.scale(scale: scale, child: child),
+                  ),
+                );
+              },
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: mediaQuery.size.width > 640 ? 356 : 332,
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onDismiss,
+                    borderRadius: BorderRadius.circular(26),
+                    child: Ink(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      decoration: BoxDecoration(
+                        color: palette.background,
+                        borderRadius: BorderRadius.circular(26),
+                        border: Border.all(color: palette.border, width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: theme.textColor.withValues(alpha: 0.1),
+                            blurRadius: 24,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(26),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 62),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 28,
+                                  height: 54,
+                                  child: Center(
+                                    child: Icon(
+                                      palette.icon,
+                                      size: 18,
+                                      color: palette.accent,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 13),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 2),
+                                    child: Text(
+                                      message,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: palette.foreground,
+                                        height: 1.24,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  _TopNoticePalette _paletteForKind() {
+    switch (kind) {
+      case _TopNoticeKind.success:
+        return _TopNoticePalette(
+          background: Color.alphaBlend(
+            theme.primaryColor.withValues(alpha: 0.2),
+            theme.cardBackgroundColor,
+          ),
+          border: theme.primaryColor.withValues(alpha: 0.34),
+          accent: theme.primaryColor,
+          foreground: theme.textColor,
+          icon: Icons.check_rounded,
+        );
+      case _TopNoticeKind.error:
+        return _TopNoticePalette(
+          background: Color.alphaBlend(
+            const Color(0xFFD85B5B).withValues(alpha: 0.18),
+            theme.cardBackgroundColor,
+          ),
+          border: const Color(0xFFD85B5B).withValues(alpha: 0.34),
+          accent: const Color(0xFFD85B5B),
+          foreground: theme.textColor,
+          icon: Icons.close_rounded,
+        );
+      case _TopNoticeKind.info:
+        return _TopNoticePalette(
+          background: Color.alphaBlend(
+            theme.accentColor.withValues(alpha: 0.18),
+            theme.cardBackgroundColor,
+          ),
+          border: theme.accentColor.withValues(alpha: 0.32),
+          accent: theme.accentColor,
+          foreground: theme.textColor,
+          icon: Icons.info_outline_rounded,
+        );
+    }
+  }
+}
+
+class _TopNoticePalette {
+  final Color background;
+  final Color border;
+  final Color accent;
+  final Color foreground;
+  final IconData icon;
+
+  const _TopNoticePalette({
+    required this.background,
+    required this.border,
+    required this.accent,
+    required this.foreground,
+    required this.icon,
+  });
 }

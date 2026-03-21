@@ -11,7 +11,7 @@ class BookshelfGridWidget extends ConsumerWidget {
   final Set<String> selectedBookIds;
   final bool selectionMode;
   final Function(Book)? onBookTap;
-  final Function(Book)? onBookLongPress;
+  final Function(Book, Offset)? onBookMenuRequest;
   final double spacing;
 
   const BookshelfGridWidget({
@@ -21,7 +21,7 @@ class BookshelfGridWidget extends ConsumerWidget {
     required this.selectedBookIds,
     required this.selectionMode,
     this.onBookTap,
-    this.onBookLongPress,
+    this.onBookMenuRequest,
     this.spacing = 20,
   });
 
@@ -78,7 +78,14 @@ class BookshelfGridWidget extends ConsumerWidget {
             isSelected: selectedBookIds.contains(book.id),
             selectionMode: selectionMode,
             onTap: () => onBookTap?.call(book),
-            onLongPress: () => onBookLongPress?.call(book),
+            onLongPressStart: selectionMode
+                ? null
+                : (details) =>
+                      onBookMenuRequest?.call(book, details.globalPosition),
+            onSecondaryTapDown: selectionMode
+                ? null
+                : (details) =>
+                      onBookMenuRequest?.call(book, details.globalPosition),
           );
         }, childCount: books.length),
       ),
