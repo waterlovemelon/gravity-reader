@@ -618,7 +618,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _fontStylePreset = fontStylePreset.clamp(0, 2);
       }
       if (backgroundPresetIndex != null) {
-        _themeIndex = backgroundPresetIndex.clamp(0, 4);
+        _themeIndex = backgroundPresetIndex.clamp(0, 11);
       }
       _backgroundMode = resolvedBackgroundMode;
       _customBackgroundImagePath = resolvedBackgroundImagePath;
@@ -1222,6 +1222,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return SafeArea(
         key: ValueKey(
           'reader-page-$index-${page.chapterIndex}-${page.startOffset}-${page.endOffset}-'
+          'theme-$_themeIndex-'
           'speaking-${ttsState.isSpeaking}-'
           'paused-${ttsState.isPaused}'
           '${useHighlightKey ? '-highlight-${(ttsState.playbackProgress * 1000).round()}' : ''}',
@@ -2069,7 +2070,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   void _selectPresetTheme(int themeIndex) {
     setState(() {
       _backgroundMode = _ReaderBackgroundMode.preset;
-      _themeIndex = themeIndex.clamp(0, 4);
+      _themeIndex = themeIndex.clamp(0, 11);
     });
     _scheduleSaveReaderPreferences();
   }
@@ -2084,10 +2085,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         controller: controller,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(right: 4),
-        itemCount: 5,
+        itemCount: 12,
         separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           final theme = [
+            // 白天模式 (8种)
             _ThemeOption(
               id: 0,
               color: const Color(0xFFF3F3F3),
@@ -2109,14 +2111,57 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             _ThemeOption(
               id: 3,
               color: const Color(0xFFA6C39D),
-              name: '绿色',
+              name: '浅绿',
               icon: Icons.nature_rounded,
             ),
             _ThemeOption(
               id: 4,
-              color: const Color(0xFF111111),
-              name: '深色',
+              color: const Color(0xFFF5ECD7),
+              name: '羊皮纸',
+              icon: Icons.auto_stories_rounded,
+            ),
+            _ThemeOption(
+              id: 5,
+              color: const Color(0xFFE3EBF2),
+              name: '雾蓝',
+              icon: Icons.water_drop_outlined,
+            ),
+            _ThemeOption(
+              id: 6,
+              color: const Color(0xFFF5E8EA),
+              name: '玫瑰粉',
+              icon: Icons.local_florist_outlined,
+            ),
+            _ThemeOption(
+              id: 7,
+              color: const Color(0xFFFFF8E7),
+              name: '奶油黄',
+              icon: Icons.wb_sunny_outlined,
+            ),
+            // 夜晚模式 (4种)
+            _ThemeOption(
+              id: 8,
+              color: const Color(0xFF121212),
+              name: '深灰',
               icon: Icons.dark_mode_rounded,
+            ),
+            _ThemeOption(
+              id: 9,
+              color: const Color(0xFF1A1B26),
+              name: '深靛',
+              icon: Icons.nights_stay_outlined,
+            ),
+            _ThemeOption(
+              id: 10,
+              color: const Color(0xFF1C1C1C),
+              name: '深咖',
+              icon: Icons.coffee_outlined,
+            ),
+            _ThemeOption(
+              id: 11,
+              color: const Color(0xFF1A2A1F),
+              name: '墨绿',
+              icon: Icons.forest_outlined,
             ),
           ][index];
           return SizedBox(
@@ -4979,11 +5024,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           : const Color(0xFFF6F1E7);
     }
     const palette = [
-      Color(0xFFF3F3F3),
-      Color(0xFFE8E2D6),
-      Color(0xFFF1F4EE),
-      Color(0xFFA6C39D),
-      Color(0xFF111111),
+      Color(0xFFF3F3F3), // 0: 浅色
+      Color(0xFFE8E2D6), // 1: 米色
+      Color(0xFFF1F4EE), // 2: 薄荷绿
+      Color(0xFFA6C39D), // 3: 浅绿
+      Color(0xFFF5ECD7), // 4: 羊皮纸
+      Color(0xFFE3EBF2), // 5: 雾蓝
+      Color(0xFFF5E8EA), // 6: 玫瑰粉
+      Color(0xFFFFF8E7), // 7: 奶油黄
+      Color(0xFF121212), // 8: 深灰 (经典护眼)
+      Color(0xFF1A1B26), // 9: 深靛 (柔和冷调)
+      Color(0xFF1C1C1C), // 10: 深咖 (温暖怀旧)
+      Color(0xFF1A2A1F), // 11: 墨绿
     ];
     return palette[_themeIndex.clamp(0, palette.length - 1)];
   }
@@ -5007,12 +5059,49 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (_isCustomBackgroundActive) {
       return (_customBackgroundBrightness ?? 0.42) < 0.45;
     }
-    return _themeIndex == 4;
+    // 夜晚模式: themeIndex >= 8 (深灰、深靛、深咖、墨绿)
+    return _themeIndex >= 8;
   }
 
-  Color get _textColor => _isDarkReaderBackground
-      ? const Color(0xFFF3F5EF)
-      : const Color(0xFF1F2A1F);
+  Color get _textColor {
+    if (_isCustomBackgroundActive) {
+      return _isDarkReaderBackground
+          ? const Color(0xFFA5A6AA)
+          : const Color(0xFF1F2A1F);
+    }
+
+    // 根据背景色返回匹配的文字色
+    switch (_themeIndex) {
+      // 白天模式 (浅色背景 + 深色文字)
+      case 0: // 浅色 #F3F3F3
+      case 1: // 米色 #E8E2D6
+      case 2: // 薄荷绿 #F1F4EE
+      case 4: // 羊皮纸 #F5ECD7
+      case 5: // 雾蓝 #E3EBF2
+      case 6: // 玫瑰粉 #F5E8EA
+      case 7: // 奶油黄 #FFF8E7
+        return const Color(0xFF1F2A1F); // 深绿色文字
+
+      case 3: // 浅绿 #A6C39D
+        return const Color(0xFF1A2218); // 更深的绿色文字
+
+      // 夜晚模式 (深色背景 + 低亮度文字)
+      case 8: // 深灰 #121212
+        return const Color(0xFF888888);
+
+      case 9: // 深靛 #1A1B26
+        return const Color(0xFF7A8DA0);
+
+      case 10: // 深咖 #1C1C1C
+        return const Color(0xFF908474);
+
+      case 11: // 墨绿 #1A2A1F
+        return const Color(0xFFA5A6AA);
+
+      default:
+        return const Color(0xFF1F2A1F); // 默认深绿色文字
+    }
+  }
 
   Color get _readerContentSurfaceColor {
     if (!_isCustomBackgroundActive) {
@@ -5056,8 +5145,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       ? const Color(0xFF4C7D5B).withValues(alpha: 0.72)
       : const Color(0xFFBFE7A8).withValues(alpha: 0.9);
 
-  Color get _ttsHighlightTextColor =>
-      _isDarkReaderBackground ? Colors.white : const Color(0xFF182118);
+  Color get _ttsHighlightTextColor => _isDarkReaderBackground
+      ? const Color(0xFFA5A6AA)
+      : const Color(0xFF182118);
 
   BoxFit get _readerBackgroundBoxFit {
     switch (_backgroundImageFit) {
@@ -5209,10 +5299,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final capsuleColor = _controlSurfaceColor;
     final primaryIconColor = _textColor;
     final secondaryIconColor = _textColor.withOpacity(0.78);
-    final progressColor = _themeIndex == 4
+    final progressColor = _isDarkReaderBackground
         ? Colors.white.withOpacity(0.82)
         : const Color(0xFFF0F8F2);
-    final trackColor = _themeIndex == 4
+    final trackColor = _isDarkReaderBackground
         ? Colors.white.withOpacity(0.14)
         : Colors.white.withOpacity(0.18);
     final coverFile = _resolveCoverFile(displayBook.coverPath);
@@ -5269,7 +5359,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   borderRadius: BorderRadius.circular(capsuleHeight / 2),
                   border: Border.all(
                     color: Colors.white.withOpacity(
-                      _themeIndex == 4 ? 0.16 : 0.24,
+                      _isDarkReaderBackground ? 0.16 : 0.24,
                     ),
                     width: 1,
                   ),
