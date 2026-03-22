@@ -7,6 +7,7 @@ import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/presentation/pages/bookshelf/bookshelf_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
+import 'package:myreader/presentation/widgets/floating_nav_bar.dart';
 
 class MainNavigationPage extends ConsumerStatefulWidget {
   const MainNavigationPage({super.key});
@@ -32,37 +33,16 @@ class _MainNavigationPageState extends ConsumerState<MainNavigationPage> {
     return Stack(
       children: [
         Scaffold(
+          extendBody: true,
           body: IndexedStack(index: _currentIndex, children: _pages),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _currentIndex,
-            onDestinationSelected: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.chrome_reader_mode_outlined),
-                selectedIcon: Icon(Icons.chrome_reader_mode),
-                label: '阅读',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.library_books_outlined),
-                selectedIcon: Icon(Icons.library_books),
-                label: '书架',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.group_outlined),
-                selectedIcon: Icon(Icons.group),
-                label: '书友',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: '我',
-              ),
-            ],
-          ),
+        ),
+        FloatingNavBar(
+          currentIndex: _currentIndex,
+          onIndexChanged: (index) {
+            setState(() {
+              _currentIndex = index;
+            });
+          },
         ),
         _GlobalPlaybackOverlay(ttsState: ttsState),
       ],
@@ -123,10 +103,8 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => ReaderPage(
-                        bookId: book.id,
-                        initialBook: book,
-                      ),
+                      builder: (_) =>
+                          ReaderPage(bookId: book.id, initialBook: book),
                     ),
                   );
                 },
@@ -191,9 +169,10 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                                 padding: const EdgeInsets.all(2),
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2.2,
-                                  valueColor: const AlwaysStoppedAnimation<Color>(
-                                    Color(0xFFF6FBF7),
-                                  ),
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<Color>(
+                                        Color(0xFFF6FBF7),
+                                      ),
                                   backgroundColor: Colors.white.withOpacity(
                                     0.14,
                                   ),
