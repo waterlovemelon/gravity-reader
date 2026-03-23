@@ -796,12 +796,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: SizedBox(
-                      width: 76,
-                      height: 104,
-                      child: _CurrentlyReadingCover(book: book),
+                  SizedBox(
+                    width: 76,
+                    height: 104,
+                    child: BookCoverWidget(
+                      book: book,
+                      width: double.infinity,
+                      height: double.infinity,
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -1493,6 +1494,20 @@ class _CurrentlyReadingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = (progress ?? 0).clamp(0.0, 1.0);
+    final warmAccent = Color.lerp(
+      theme.primaryColor,
+      const Color(0xFFE5A93D),
+      0.42,
+    )!;
+    final cardBase = Color.lerp(theme.cardBackgroundColor, warmAccent, 0.18)!;
+    final cardHighlight = Color.lerp(
+      theme.cardBackgroundColor,
+      warmAccent,
+      0.3,
+    )!;
+    final borderColor = Color.lerp(theme.dividerColor, warmAccent, 0.36)!;
+    final badgeBackground = warmAccent.withValues(alpha: 0.16);
+    final badgeTextColor = Color.lerp(theme.textColor, warmAccent, 0.5)!;
 
     return Material(
       color: Colors.transparent,
@@ -1500,47 +1515,51 @@ class _CurrentlyReadingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(26),
         onTap: onTap,
         child: Ink(
-          padding: const EdgeInsets.all(13),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: theme.cardBackgroundColor,
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(
-              color: theme.dividerColor.withValues(alpha: 0.72),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [cardHighlight, cardBase, theme.cardBackgroundColor],
+              stops: const [0, 0.45, 1],
             ),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: borderColor.withValues(alpha: 0.9)),
             boxShadow: [
               BoxShadow(
-                color: theme.textColor.withValues(alpha: 0.05),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
+                color: theme.textColor.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
           child: SizedBox(
-            height: 126,
+            height: 136,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
-                  width: 92,
+                  width: 106,
                   child: AspectRatio(
                     aspectRatio: 0.72,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: _CurrentlyReadingCover(book: book),
+                    child: BookCoverWidget(
+                      book: book,
+                      width: double.infinity,
+                      height: double.infinity,
                     ),
                   ),
                 ),
-                const SizedBox(width: 13),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 1),
+                    padding: const EdgeInsets.only(top: 2),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           book.title,
                           style: TextStyle(
-                            fontSize: 19,
+                            fontSize: 19.5,
                             height: 1.1,
                             fontWeight: FontWeight.w700,
                             color: theme.textColor,
@@ -1554,7 +1573,7 @@ class _CurrentlyReadingCard extends StatelessWidget {
                               ? book.author!
                               : '未知作者',
                           style: TextStyle(
-                            fontSize: 12.5,
+                            fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: theme.secondaryTextColor.withValues(
                               alpha: 0.9,
@@ -1610,9 +1629,7 @@ class _CurrentlyReadingCard extends StatelessWidget {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: theme.primaryColor.withValues(
-                                  alpha: 0.1,
-                                ),
+                                color: badgeBackground,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
@@ -1620,9 +1637,7 @@ class _CurrentlyReadingCard extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: theme.primaryColor.withValues(
-                                    alpha: 0.82,
-                                  ),
+                                  color: badgeTextColor,
                                 ),
                               ),
                             ),
@@ -1631,9 +1646,9 @@ class _CurrentlyReadingCard extends StatelessWidget {
                               onPressed: onListenTap,
                               style: FilledButton.styleFrom(
                                 visualDensity: VisualDensity.compact,
-                                minimumSize: const Size(82, 32),
+                                minimumSize: const Size(86, 41),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 15,
+                                  horizontal: 16,
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(999),
@@ -1652,45 +1667,6 @@ class _CurrentlyReadingCard extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CurrentlyReadingCover extends StatelessWidget {
-  final Book book;
-
-  const _CurrentlyReadingCover({required this.book});
-
-  @override
-  Widget build(BuildContext context) {
-    if (book.coverPath != null && book.coverPath!.isNotEmpty) {
-      final file = File(book.coverPath!);
-      if (file.existsSync()) {
-        return Image.file(file, fit: BoxFit.cover);
-      }
-    }
-
-    final colors = [
-      const Color(0xFFDCE7D8),
-      const Color(0xFFD7E5EC),
-      const Color(0xFFE8DED4),
-    ];
-    final color = colors[book.title.hashCode.abs() % colors.length];
-    return Container(
-      color: color,
-      padding: const EdgeInsets.all(14),
-      alignment: Alignment.centerLeft,
-      child: Text(
-        book.title,
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontSize: 16,
-          height: 1.1,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF203126),
         ),
       ),
     );

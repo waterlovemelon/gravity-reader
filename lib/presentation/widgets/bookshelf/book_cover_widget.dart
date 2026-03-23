@@ -41,7 +41,7 @@ class BookCoverWidget extends ConsumerWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: _buildCover(context, ref),
+        child: BookCoverImage(book: book, width: width, height: height),
       ),
     );
 
@@ -53,10 +53,24 @@ class BookCoverWidget extends ConsumerWidget {
           : Hero(tag: heroTag!, transitionOnUserGestures: true, child: cover),
     );
   }
+}
 
-  Widget _buildCover(BuildContext context, WidgetRef ref) {
+class BookCoverImage extends ConsumerWidget {
+  final Book book;
+  final double? width;
+  final double? height;
+
+  const BookCoverImage({
+    super.key,
+    required this.book,
+    this.width,
+    this.height,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     if (book.coverPath != null && book.coverPath!.isNotEmpty) {
-      final coverFile = File(book.coverPath!);
+      final coverFile = _resolveCoverFile(book.coverPath);
       if (coverFile.existsSync()) {
         return Image.file(
           coverFile,
@@ -97,5 +111,19 @@ class BookCoverWidget extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  File _resolveCoverFile(String? rawPath) {
+    final trimmed = rawPath?.trim() ?? '';
+    if (trimmed.startsWith('file://')) {
+      final uri = Uri.tryParse(trimmed);
+      if (uri != null) {
+        final path = uri.toFilePath();
+        if (path.isNotEmpty) {
+          return File(path);
+        }
+      }
+    }
+    return File(trimmed);
   }
 }

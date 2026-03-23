@@ -1,12 +1,12 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/models/app_theme_data.dart';
+import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/presentation/pages/bookshelf/bookshelf_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
+import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:myreader/presentation/widgets/floating_nav_bar.dart';
 
 class MainNavigationPage extends ConsumerStatefulWidget {
@@ -67,11 +67,8 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    final coverPath = book.coverPath;
-    final coverFile = coverPath != null && coverPath.isNotEmpty
-        ? File(coverPath)
-        : null;
-    final hasCover = coverFile != null && coverFile.existsSync();
+    final latestBook = ref.watch(bookByIdProvider(book.id)).valueOrNull;
+    final displayBook = latestBook ?? book;
     final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
     final canTapPlayback = !isLoadingAudio || ttsState.isPaused;
 
@@ -103,8 +100,10 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) =>
-                          ReaderPage(bookId: book.id, initialBook: book),
+                      builder: (_) => ReaderPage(
+                        bookId: displayBook.id,
+                        initialBook: displayBook,
+                      ),
                     ),
                   );
                 },
@@ -118,16 +117,7 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(3),
-                    child: ClipOval(
-                      child: hasCover
-                          ? Image.file(
-                              coverFile,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  _globalCoverPlaceholder(book.title),
-                            )
-                          : _globalCoverPlaceholder(book.title),
-                    ),
+                    child: ClipOval(child: BookCoverImage(book: displayBook)),
                   ),
                 ),
               ),
@@ -207,29 +197,6 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
               ),
               const SizedBox(width: 5),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _globalCoverPlaceholder(String title) {
-    final initials = title.trim().isEmpty ? '读' : title.trim().substring(0, 1);
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF7FBF7), Color(0xFFB9D4BD)],
-        ),
-      ),
-      child: Center(
-        child: Text(
-          initials,
-          style: TextStyle(
-            color: const Color(0xFF365446).withOpacity(0.88),
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
           ),
         ),
       ),

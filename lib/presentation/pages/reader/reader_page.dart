@@ -21,6 +21,7 @@ import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/pages/reader/audiobook_page.dart';
+import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -639,7 +640,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       vsync: this,
       duration: const Duration(seconds: 18),
     );
-    _applySystemUiVisibility();
+    if (!widget.hiddenForAutoStart) {
+      _applySystemUiVisibility();
+    }
     _loadReaderPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _didLogFirstFrame) {
@@ -658,7 +661,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _txtOpeningViewDelayTimer?.cancel();
     _autoPageTimer?.cancel();
     _floatingCoverController.dispose();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (!widget.hiddenForAutoStart) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
     _pageController.dispose();
     super.dispose();
   }
@@ -674,9 +679,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         return true;
       },
       child: Scaffold(
-        backgroundColor: widget.hiddenForAutoStart
-            ? Colors.transparent
-            : _readerBgColor,
+        backgroundColor: Colors.transparent,
         body: bookAsync.when(
           data: (book) => _buildReader(book ?? widget.initialBook),
           loading: () => widget.initialBook != null
@@ -1061,6 +1064,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final shouldShowTxtOpeningView =
         isPreparingTxt || (_isTxtBook(book) && _txtPages.isEmpty);
 
+    if (shouldShowTxtOpeningView && widget.hiddenForAutoStart) {
+      return const SizedBox.shrink();
+    }
+
     if (shouldShowTxtOpeningView && _showTxtOpeningView) {
       return _buildOpeningView(book);
     }
@@ -1093,6 +1100,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           Navigator.of(context).pop();
         }
       });
+    }
+
+    if (widget.hiddenForAutoStart) {
+      return const SizedBox.shrink();
     }
 
     final readerContent = Stack(
@@ -5687,7 +5698,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Color get _textColor {
     if (_isCustomBackgroundActive) {
       return _isDarkReaderBackground
-          ? const Color(0xFFA5A6AA)
+          ? const Color(0xFF94969B)
           : const Color(0xFF1F2A1F);
     }
 
@@ -5708,16 +5719,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
       // 夜晚模式 (深色背景 + 低亮度文字)
       case 8: // 深灰 #121212
-        return const Color(0xFF888888);
+        return const Color(0xFF7A7A7A);
 
       case 9: // 深靛 #1A1B26
-        return const Color(0xFF7A8DA0);
+        return const Color(0xFF6E8090);
 
       case 10: // 深咖 #1C1C1C
-        return const Color(0xFF908474);
+        return const Color(0xFF817564);
 
       case 11: // 墨绿 #1A2A1F
-        return const Color(0xFFA5A6AA);
+        return const Color(0xFF94969B);
 
       default:
         return const Color(0xFF1F2A1F); // 默认深绿色文字
@@ -5766,9 +5777,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       ? const Color(0xFF4C7D5B).withValues(alpha: 0.72)
       : const Color(0xFFBFE7A8).withValues(alpha: 0.9);
 
-  Color get _ttsHighlightTextColor => _isDarkReaderBackground
-      ? const Color(0xFFA5A6AA)
-      : const Color(0xFF182118);
+  Color get _ttsHighlightTextColor =>
+      _isDarkReaderBackground ? _textColor : const Color(0xFF182118);
 
   BoxFit get _readerBackgroundBoxFit {
     switch (_backgroundImageFit) {
@@ -5926,8 +5936,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final trackColor = _isDarkReaderBackground
         ? Colors.white.withOpacity(0.14)
         : Colors.white.withOpacity(0.18);
-    final coverFile = _resolveCoverFile(displayBook.coverPath);
-    final hasCover = coverFile != null && coverFile.existsSync();
     final chapterProgress = _currentChapterReadingProgress(
       displayBook,
       totalPages,
@@ -6031,18 +6039,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                 child: Padding(
                                   padding: const EdgeInsets.all(3),
                                   child: ClipOval(
-                                    child: hasCover
-                                        ? Image.file(
-                                            coverFile,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) =>
-                                                _buildFloatingPlaybackCoverPlaceholder(
-                                                  displayBook,
-                                                ),
-                                          )
-                                        : _buildFloatingPlaybackCoverPlaceholder(
-                                            displayBook,
-                                          ),
+                                    child: BookCoverImage(book: displayBook),
                                   ),
                                 ),
                               ),
@@ -6137,22 +6134,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  File? _resolveCoverFile(String? rawPath) {
-    final trimmed = rawPath?.trim() ?? '';
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    if (trimmed.startsWith('file://')) {
-      final uri = Uri.tryParse(trimmed);
-      if (uri == null) {
-        return null;
-      }
-      final path = uri.toFilePath();
-      return path.isEmpty ? null : File(path);
-    }
-    return File(trimmed);
-  }
-
   Offset _clampFloatingPlaybackOffset(
     Offset offset, {
     required Size screenSize,
@@ -6203,31 +6184,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return 0.0;
     }
     return (currentPage.endOffset / chapter.content.length).clamp(0.0, 1.0);
-  }
-
-  Widget _buildFloatingPlaybackCoverPlaceholder(Book book) {
-    final title = book.title.trim();
-    final initials = title.isEmpty ? '读' : title.substring(0, 1);
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF7FBF7), Color(0xFFB9D4BD)],
-        ),
-      ),
-      child: Center(
-        child: Text(
-          initials,
-          style: TextStyle(
-            color: const Color(0xFF365446).withOpacity(0.88),
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
   }
 
   String? _getEpubPageText(Book book) {

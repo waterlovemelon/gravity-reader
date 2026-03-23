@@ -999,9 +999,9 @@ class TtsService {
   int _estimateDurationMs(String text) {
     final normalizedText = text.trim();
     final baseLength = math.max(1, normalizedText.length);
-    final punctuationPauses = RegExp(r'[，。！？；：,.!?;:\n]')
-        .allMatches(normalizedText)
-        .length;
+    final punctuationPauses = RegExp(
+      r'[，。！？；：,.!?;:\n]',
+    ).allMatches(normalizedText).length;
     // A rougher but more conservative estimate for Mandarin/English mixed TTS.
     // Add punctuation pause weight so fallback progress does not advance too fast.
     final weightedLength = baseLength + punctuationPauses * 2;
@@ -1085,8 +1085,10 @@ class TtsService {
     final currentChunkProgress = currentDurationMs > 0
         ? (position.inMilliseconds / currentDurationMs).clamp(0.0, 1.0)
         : 0.0;
-    final chunkOffset =
-        (chunkLength * currentChunkProgress).round().clamp(0, chunkLength);
+    final chunkOffset = (chunkLength * currentChunkProgress).round().clamp(
+      0,
+      chunkLength,
+    );
     return (chunkPlan.chapterOffsetStart + chunkOffset).clamp(
       0,
       math.max(0, chunkPlan.chapterLength - 1),
@@ -1140,8 +1142,18 @@ class TtsService {
       for (final chapter in chapterQueue) chapter.index: chapter.title.trim(),
     };
     final chunks = chunkPlans.map((plan) => plan.text).toList(growable: false);
+    final plannedTextLength = chunkPlans.fold<int>(
+      0,
+      (sum, plan) => sum + plan.text.length,
+    );
+    final plannedChapterCount = chunkPlans
+        .map((plan) => plan.chapterIndex)
+        .toSet()
+        .length;
     _log(
-      'cloud request: totalTextLength=${text.length}, '
+      'cloud request: entryTextLength=${text.length}, '
+      'plannedTextLength=$plannedTextLength, '
+      'plannedChapterCount=$plannedChapterCount, '
       'chunkCount=${chunks.length}, '
       'chunkLengths=${chunks.map((e) => e.length).join(",")}, '
       'voice=$_selectedVoice, '
@@ -1523,7 +1535,9 @@ class TtsService {
         context?.chapterTitle?.trim();
     final author = context?.author?.trim();
     final artUri = _artUriFromCoverPath(context?.coverPath);
-    final chunkLabel = totalChunks > 1 ? '片段 ${chunkIndex + 1}/$totalChunks' : null;
+    final chunkLabel = totalChunks > 1
+        ? '片段 ${chunkIndex + 1}/$totalChunks'
+        : null;
     final subtitleParts = <String>[
       if (chapterTitle != null && chapterTitle.isNotEmpty) chapterTitle,
       if (chunkLabel != null) chunkLabel,
@@ -1535,8 +1549,12 @@ class TtsService {
       album: (author != null && author.isNotEmpty) ? author : null,
       artist: subtitleParts.isEmpty ? null : subtitleParts.join(' • '),
       artUri: artUri,
-      displayTitle: (title != null && title.isNotEmpty) ? title : 'Gravity Reader',
-      displaySubtitle: subtitleParts.isEmpty ? author : subtitleParts.join(' • '),
+      displayTitle: (title != null && title.isNotEmpty)
+          ? title
+          : 'Gravity Reader',
+      displaySubtitle: subtitleParts.isEmpty
+          ? author
+          : subtitleParts.join(' • '),
       displayDescription: (author != null && author.isNotEmpty) ? author : null,
     );
   }
@@ -1547,6 +1565,9 @@ class TtsService {
       return null;
     }
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return Uri.tryParse(trimmed);
+    }
+    if (trimmed.startsWith('file://')) {
       return Uri.tryParse(trimmed);
     }
     return Uri.file(trimmed);
@@ -1737,6 +1758,7 @@ class TtsService {
     required bool continuousChapterQueue,
   }) {
     final plans = <_CloudChunkPlan>[];
+    const maxQueuedFutureChapters = 2;
 
     void appendChapter({
       required String chapterText,
@@ -1777,7 +1799,11 @@ class TtsService {
       return plans;
     }
 
+    var queuedFutureChapters = 0;
     for (var i = currentQueuePos + 1; i < chapterQueue.length; i++) {
+      if (queuedFutureChapters >= maxQueuedFutureChapters) {
+        break;
+      }
       final chapter = chapterQueue[i];
       if (chapter.text.trim().isEmpty) {
         continue;
@@ -1787,6 +1813,7 @@ class TtsService {
         chapterIndex: chapter.index,
         chapterLength: chapter.text.length,
       );
+      queuedFutureChapters++;
     }
 
     return plans;

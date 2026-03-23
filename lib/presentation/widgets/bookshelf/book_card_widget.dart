@@ -33,84 +33,90 @@ class BookCardWidget extends ConsumerWidget {
       onTap: onTap,
       onLongPressStart: onLongPressStart,
       onSecondaryTapDown: onSecondaryTapDown,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 0.76,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: BookCoverWidget(
-                    book: book,
-                    width: double.infinity,
-                    height: double.infinity,
-                    heroTag: 'book-cover-${book.id}',
-                  ),
-                ),
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                  child: _CoverProgressLine(progress: progress),
-                ),
-                if (selectionMode)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: 17,
-                      height: 17,
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? theme.primaryColor
-                            : Colors.white.withValues(alpha: 0.82),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected
-                              ? theme.primaryColor
-                              : theme.secondaryTextColor.withValues(
-                                  alpha: 0.22,
-                                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: AspectRatio(
+                aspectRatio: 0.72,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: BookCoverWidget(
+                        book: book,
+                        width: double.infinity,
+                        height: double.infinity,
+                        heroTag: 'book-cover-${book.id}',
+                      ),
+                    ),
+                    Positioned(
+                      left: 7,
+                      right: 7,
+                      bottom: 7,
+                      child: _CoverProgressLine(progress: progress),
+                    ),
+                    if (selectionMode)
+                      Positioned(
+                        top: 7,
+                        right: 7,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? theme.primaryColor
+                                : Colors.white.withValues(alpha: 0.82),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected
+                                  ? theme.primaryColor
+                                  : theme.secondaryTextColor.withValues(
+                                      alpha: 0.22,
+                                    ),
+                            ),
+                          ),
+                          child: isSelected
+                              ? const Icon(
+                                  Icons.check_rounded,
+                                  size: 10,
+                                  color: Colors.white,
+                                )
+                              : null,
                         ),
                       ),
-                      child: isSelected
-                          ? const Icon(
-                              Icons.check_rounded,
-                              size: 11,
-                              color: Colors.white,
-                            )
-                          : null,
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            book.title,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.1,
-              fontWeight: FontWeight.w700,
-              color: theme.textColor,
+            const SizedBox(height: 7),
+            Text(
+              book.title,
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.1,
+                fontWeight: FontWeight.w700,
+                color: theme.textColor,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 1),
-          Text(
-            book.author?.trim().isNotEmpty == true ? book.author! : '未知作者',
-            style: TextStyle(
-              fontSize: 10,
-              height: 1,
-              color: theme.secondaryTextColor.withValues(alpha: 0.78),
+            const SizedBox(height: 2),
+            Text(
+              book.author?.trim().isNotEmpty == true ? book.author! : '未知作者',
+              style: TextStyle(
+                fontSize: 9.5,
+                height: 1,
+                color: theme.secondaryTextColor.withValues(alpha: 0.78),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

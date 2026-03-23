@@ -62,13 +62,13 @@ class BookshelfGridWidget extends ConsumerWidget {
     }
 
     return SliverPadding(
-      padding: EdgeInsets.fromLTRB(spacing, 0, spacing, spacing),
+      padding: EdgeInsets.fromLTRB(spacing, 0, spacing, spacing + 80),
       sliver: SliverGrid(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
-          childAspectRatio: 0.61,
-          crossAxisSpacing: 13,
-          mainAxisSpacing: 16,
+          childAspectRatio: 0.58,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 18,
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final book = books[index];

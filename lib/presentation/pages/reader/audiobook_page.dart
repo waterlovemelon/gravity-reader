@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:developer' as developer;
 
@@ -10,6 +9,7 @@ import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/domain/entities/book.dart';
+import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 
 class AudiobookPage extends ConsumerStatefulWidget {
   final Book book;
@@ -1178,10 +1178,14 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       176.0,
       300.0,
     );
+    final syncedTtsBook = ref.watch(
+      ttsProvider.select(
+        (state) =>
+            state.currentBook?.id == widget.book.id ? state.currentBook : null,
+      ),
+    );
     final latestBook = ref.watch(bookByIdProvider(widget.book.id)).valueOrNull;
-    final displayBook = latestBook ?? widget.book;
-    final coverFile = _resolveCoverFile(displayBook.coverPath);
-    final hasCover = coverFile != null && coverFile.existsSync();
+    final displayBook = latestBook ?? syncedTtsBook ?? widget.book;
     final discEdge = const Color(0xFFE7E1D5);
     final discSurface = const Color(0xFFD9D4C6);
     final discShadow = const Color(0xFFB9B09D);
@@ -1313,16 +1317,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                         ],
                       ),
                     ),
-                    child: ClipOval(
-                      child: hasCover
-                          ? Image.file(
-                              coverFile,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  _buildCoverPlaceholder(),
-                            )
-                          : _buildCoverPlaceholder(),
-                    ),
+                    child: ClipOval(child: BookCoverImage(book: displayBook)),
                   ),
                   Container(
                     width: discSize * 0.12,
@@ -1369,34 +1364,6 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  File? _resolveCoverFile(String? rawPath) {
-    final trimmed = rawPath?.trim() ?? '';
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    if (trimmed.startsWith('file://')) {
-      final uri = Uri.tryParse(trimmed);
-      if (uri == null) {
-        return null;
-      }
-      final path = uri.toFilePath();
-      return path.isEmpty ? null : File(path);
-    }
-    return File(trimmed);
-  }
-
-  Widget _buildCoverPlaceholder() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Icon(Icons.menu_book_rounded, size: 60, color: _accentGreen),
       ),
     );
   }
