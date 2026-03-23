@@ -54,14 +54,12 @@ class _TxtPage {
   final int chapterIndex;
   final int startOffset;
   final int endOffset;
-  final bool isVolume;
 
   const _TxtPage({
     required this.title,
     required this.chapterIndex,
     required this.startOffset,
     required this.endOffset,
-    this.isVolume = false,
   });
 }
 
@@ -113,13 +111,11 @@ class _TxtChapter {
   final String title;
   final String content;
   final int index;
-  final bool isVolume;
 
   const _TxtChapter({
     required this.title,
     required this.content,
     required this.index,
-    this.isVolume = false,
   });
 }
 
@@ -161,90 +157,6 @@ class _ThemeOption {
     required this.name,
     required this.icon,
   });
-}
-
-class _ParsedChapterHeader {
-  final String number;
-  final String name;
-
-  const _ParsedChapterHeader({required this.number, required this.name});
-}
-
-class _ChapterHeaderOrnamentPainter extends CustomPainter {
-  final Color color;
-
-  const _ChapterHeaderOrnamentPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.width <= 0 || size.height <= 0) {
-      return;
-    }
-
-    final centerX = size.width * 0.5;
-    final top = 4.0;
-    final bottom = max(top + 1, size.height - 4);
-    final topBudY = top + 4.5;
-    final bottomBudY = bottom - 4.5;
-
-    final linePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final detailPaint = Paint()
-      ..color = color.withValues(alpha: 0.15)
-      ..style = PaintingStyle.fill;
-
-    final innerLinePaint = Paint()
-      ..color = color.withValues(alpha: 0.28)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..strokeCap = StrokeCap.round;
-
-    final stemPath = Path()
-      ..moveTo(centerX - 0.35, topBudY + 1.5)
-      ..quadraticBezierTo(
-        centerX + 0.8,
-        size.height * 0.36,
-        centerX - 0.15,
-        bottomBudY - 1.5,
-      );
-    canvas.drawPath(stemPath, linePaint);
-
-    final innerStemPath = Path()
-      ..moveTo(centerX + 0.2, topBudY + 2.6)
-      ..quadraticBezierTo(
-        centerX + 0.55,
-        size.height * 0.38,
-        centerX + 0.15,
-        bottomBudY - 2.2,
-      );
-    canvas.drawPath(innerStemPath, innerLinePaint);
-
-    final topBud = Path()
-      ..moveTo(centerX, top)
-      ..quadraticBezierTo(centerX + 2.6, topBudY - 1.8, centerX, topBudY)
-      ..quadraticBezierTo(centerX - 2.6, topBudY - 1.8, centerX, top)
-      ..close();
-    canvas.drawPath(topBud, detailPaint);
-    canvas.drawPath(topBud, linePaint);
-
-    final bottomBud = Path()
-      ..moveTo(centerX, bottom)
-      ..quadraticBezierTo(centerX + 2.2, bottomBudY + 1.2, centerX, bottomBudY)
-      ..quadraticBezierTo(centerX - 2.2, bottomBudY + 1.2, centerX, bottom)
-      ..close();
-    canvas.drawPath(bottomBud, detailPaint);
-    canvas.drawPath(bottomBud, linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _ChapterHeaderOrnamentPainter oldDelegate) {
-    return oldDelegate.color != color;
-  }
 }
 
 enum _ReaderPanel { none, toc, notes, progress, theme, typography }
@@ -483,10 +395,6 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
 class _ReaderPageState extends ConsumerState<ReaderPage>
     with SingleTickerProviderStateMixin {
   static const String _prefFontSizePreset = 'reader_font_size_preset_v1';
-  static const double _chapterHeaderOrnamentWidth = 10;
-  static const double _chapterHeaderGap = 10;
-  static const double _chapterHeaderLineSpacing = 4;
-  static const double _chapterHeaderBottomSpacing = 18;
   static const String _prefPaddingPreset = 'reader_padding_preset_v1';
   static const String _prefLineHeightPreset = 'reader_line_height_preset_v1';
   static const String _prefTextAlignPreset = 'reader_text_align_preset_v1';
@@ -561,10 +469,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _didLogFirstFrame = false;
   bool _didLogTxtContentFrame = false;
   bool _didAutoStartFloatingPlayback = false;
-  int _chapterSwitchTraceId = 0;
-  int? _activeChapterSwitchTraceId;
-  Timer? _chapterSwitchWatchdogTimer;
-  Timer? _chapterSwitchLongWatchdogTimer;
 
   void _logOpenTrace(String message) {
     final traceId = widget.openTraceId;
@@ -577,58 +481,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     debugPrint(
       '[open-book][$traceId][${elapsedMs.toStringAsFixed(1)}ms] $message',
     );
-  }
-
-  void _logChapterSwitch(String message, {int? traceId}) {
-    final id = traceId ?? _activeChapterSwitchTraceId;
-    final prefix = id == null ? '[chapter-switch]' : '[chapter-switch][$id]';
-    debugPrint('$prefix $message');
-  }
-
-  int _beginChapterSwitchTrace(String source, _TxtLocation location) {
-    final traceId = ++_chapterSwitchTraceId;
-    _activeChapterSwitchTraceId = traceId;
-    _chapterSwitchWatchdogTimer?.cancel();
-    _chapterSwitchLongWatchdogTimer?.cancel();
-    _logChapterSwitch(
-      'start source=$source chapter=${location.chapterIndex} offset=${location.offset} '
-      'currentPage=$_currentPage visiblePages=${_txtPages.length}',
-      traceId: traceId,
-    );
-    _chapterSwitchWatchdogTimer = Timer(const Duration(milliseconds: 450), () {
-      _logChapterSwitch(
-        'watchdog 450ms currentPage=$_currentPage hasClients=${_pageController.hasClients} '
-        'visiblePages=${_txtPages.length}',
-        traceId: traceId,
-      );
-    });
-    _chapterSwitchLongWatchdogTimer = Timer(
-      const Duration(milliseconds: 1500),
-      () {
-        _logChapterSwitch(
-          'watchdog 1500ms currentPage=$_currentPage hasClients=${_pageController.hasClients} '
-          'visiblePages=${_txtPages.length}',
-          traceId: traceId,
-        );
-      },
-    );
-    return traceId;
-  }
-
-  void _completeChapterSwitchTrace(String reason, {int? traceId}) {
-    final id = traceId ?? _activeChapterSwitchTraceId;
-    if (id == null) {
-      return;
-    }
-    _logChapterSwitch(
-      'complete reason=$reason currentPage=$_currentPage',
-      traceId: id,
-    );
-    if (id == _activeChapterSwitchTraceId) {
-      _chapterSwitchWatchdogTimer?.cancel();
-      _chapterSwitchLongWatchdogTimer?.cancel();
-      _activeChapterSwitchTraceId = null;
-    }
   }
 
   @override
@@ -1149,10 +1001,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       setState(() {
                         _currentPage = page;
                         _currentTxtLocation = nextLocation;
+                        _txtToc = _buildTocFromChaptersForLocation(
+                          txtPage.chapterIndex,
+                        );
                       });
-                      _completeChapterSwitchTrace(
-                        'onPageChanged chapter=${txtPage.chapterIndex}',
-                      );
                       if (!_isAdjustingTxtPageStream) {
                         _ensureTxtPageStreamAround(page);
                       }
@@ -1324,104 +1176,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  Widget _buildVolumePageContent(_TxtPage page, _TxtChapter? chapter) {
-    final title = page.title;
-    String volumeNumber = '';
-    String volumeName = '';
-
-    final volumeMatch = RegExp(
-      r'^\s*(第[^卷部册篇]+[卷部册篇]|[卷部册篇][^\s]+)\s*(.*)$',
-    ).firstMatch(title);
-    if (volumeMatch != null) {
-      volumeNumber = volumeMatch.group(1)?.trim() ?? '';
-      volumeName = volumeMatch.group(2)?.trim() ?? '';
-    } else {
-      volumeNumber = title;
-    }
-
-    final accentColor = _chapterHeaderAccentColor;
-    final volumeNameStyle = TextStyle(
-      fontSize: _contentFontSize * 1.62,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.35,
-      height: 1.0,
-      color: accentColor,
-      fontStyle: FontStyle.italic,
-      fontFamilyFallback: _chapterHeaderArtFontFallback,
-    );
-    final volumeNumberStyle = TextStyle(
-      fontSize: _contentFontSize * 0.94,
-      fontWeight: FontWeight.w500,
-      letterSpacing: 0.55,
-      height: 1.0,
-      color: accentColor,
-      fontFamilyFallback: _chapterHeaderArtFontFallback,
-    );
-
-    return SafeArea(
-      child: Padding(
-        padding: _contentPadding,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          textDirection: TextDirection.rtl,
-          children: [
-            if (volumeName.isNotEmpty)
-              _buildVerticalTitleColumn(
-                text: volumeName,
-                style: volumeNameStyle,
-                charSpacing: _contentFontSize * 0.24,
-              ),
-            if (volumeName.isNotEmpty) const SizedBox(width: 18),
-            _buildVerticalTitleColumn(
-              text: volumeNumber,
-              style: volumeNumberStyle,
-              charSpacing: _contentFontSize * 0.18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVerticalTitleColumn({
-    required String text,
-    required TextStyle style,
-    required double charSpacing,
-  }) {
-    final glyphs = text
-        .replaceAll(RegExp(r'\s+'), '')
-        .runes
-        .map(String.fromCharCode)
-        .where((char) => char.isNotEmpty)
-        .toList(growable: false);
-
-    if (glyphs.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        for (var i = 0; i < glyphs.length; i++) ...[
-          Text(glyphs[i], textScaler: TextScaler.noScaling, style: style),
-          if (i < glyphs.length - 1) SizedBox(height: charSpacing),
-        ],
-      ],
-    );
-  }
-
   Widget _buildPageContent(int index, Book book, TtsAppState ttsState) {
     if (_isTxtBook(book)) {
       final page = _txtPages[index];
       final chapter = _txtChapterByIndex[page.chapterIndex];
-
-      // 如果是卷名页面，使用特殊的竖排显示
-      if (page.isVolume) {
-        return _buildVolumePageContent(page, chapter);
-      }
-
       final chapterText = chapter?.content ?? '';
       final safeStart = page.startOffset.clamp(0, chapterText.length);
       final safeEnd = page.endOffset.clamp(safeStart, chapterText.length);
@@ -1460,9 +1218,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         color: _textColor,
         fontFamily: _contentFontFamily,
       );
-      final chapterHeader = showChapterHeader
-          ? _buildChapterHeader(chapterTitle: page.title, bodyStyle: bodyStyle)
-          : null;
       final highlightRange = _resolveTtsHighlightRange(
         ttsState: ttsState,
         chapterText: chapterText,
@@ -1490,7 +1245,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (chapterHeader != null) chapterHeader,
                   Expanded(
                     child: SizedBox(
                       width: double.infinity,
@@ -1504,6 +1258,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           children: _buildPageTextSpans(
                             text: visibleText,
                             bodyStyle: bodyStyle,
+                            chapterTitle: showChapterHeader ? page.title : null,
                             startsAtParagraphBoundary:
                                 _startsAtParagraphBoundary(
                                   chapterText: chapterText,
@@ -1834,9 +1589,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _applySystemUiVisibility();
 
     if (selection.chapterIndex != null) {
-      _logChapterSwitch(
-        'toc selection chapter=${selection.chapterIndex} pageIndex=${selection.pageIndex}',
-      );
       _jumpToTxtChapter(selection.chapterIndex!);
     } else {
       _jumpToPage(selection.pageIndex);
@@ -3800,7 +3552,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final safeOffset = offset.clamp(0, chapter.content.length);
     _loadTxtChapterAtLocation(
       _TxtLocation(chapterIndex: chapterIndex, offset: safeOffset),
-      traceSource: 'txt_location',
     );
   }
 
@@ -3901,41 +3652,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return false;
   }
 
-  void _restorePageAfterBuild(int page, {int retries = 8, int? traceId}) {
+  void _restorePageAfterBuild(int page, {int retries = 8}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       if (_pageController.hasClients) {
-        _logChapterSwitch(
-          'post-frame restore page=$page retriesLeft=$retries',
-          traceId: traceId,
-        );
         _pageController.jumpToPage(page);
         return;
       }
       if (retries <= 0) {
-        _logChapterSwitch(
-          'restore retries exhausted for page=$page',
-          traceId: traceId,
-        );
-        _completeChapterSwitchTrace(
-          'restore_retries_exhausted',
-          traceId: traceId,
-        );
         return;
       }
       Future<void>.delayed(const Duration(milliseconds: 16), () {
-        _restorePageAfterBuild(page, retries: retries - 1, traceId: traceId);
+        _restorePageAfterBuild(page, retries: retries - 1);
       });
     });
   }
 
   void _replacePageController(int initialPage) {
     final previous = _pageController;
-    _logChapterSwitch(
-      'dispose old controller, create new initialPage=$initialPage',
-    );
     _pageController = PageController(
       keepPage: false,
       initialPage: max(0, initialPage),
@@ -4015,7 +3751,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               title: chapter.title,
               content: chapter.content,
               index: chapter.index,
-              isVolume: chapter.isVolume,
             ),
           )
           .toList(growable: false);
@@ -4055,8 +3790,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         location: initialLocation,
         chapters: chapters,
         chapterByIndex: chapterByIndex,
-        precise: false,
-        includeAdjacentChapters: false,
       );
       final initialPageIndex = _resolvePageFromLocation(
         'txt:${initialLocation.chapterIndex}:${initialLocation.offset}',
@@ -4096,7 +3829,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _logOpenTrace(
           'txt content frame rendered, chapter=${page.chapterIndex}, page=${page.startOffset}-${page.endOffset}',
         );
-        _scheduleRepaginate(immediate: true);
       });
     } catch (e) {
       _logOpenTrace('txt load failed: $e');
@@ -4177,9 +3909,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   List<_TxtPage> _paginateChapterPages(_TxtChapter chapter) {
     final text = chapter.content;
-    _logChapterSwitch(
-      'paginate precise start chapter=${chapter.index} title="${chapter.title}" chars=${text.length}',
-    );
     if (text.isEmpty) {
       return [
         _TxtPage(
@@ -4187,7 +3916,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           chapterIndex: chapter.index,
           startOffset: 0,
           endOffset: 0,
-          isVolume: chapter.isVolume,
         ),
       ];
     }
@@ -4196,15 +3924,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final height = _contentMaxHeight;
     final style = _paginationTextStyle();
     final pages = <_TxtPage>[];
-    final paginateStart = DateTime.now().microsecondsSinceEpoch;
     var start = 0;
-    var pageCount = 0;
     while (start < text.length) {
-      if (pageCount == 0 || pageCount % 20 == 0) {
-        _logChapterSwitch(
-          'paginate precise progress chapter=${chapter.index} pageCount=$pageCount start=$start/${text.length}',
-        );
-      }
       final end = _pageEndForText(
         text: text,
         start: start,
@@ -4219,14 +3940,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           chapterIndex: chapter.index,
           startOffset: start,
           endOffset: end,
-          isVolume: chapter.isVolume,
         ),
       );
       if (end <= start) {
         break;
       }
       start = end;
-      pageCount++;
     }
     if (pages.isEmpty) {
       pages.add(
@@ -4235,133 +3954,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           chapterIndex: chapter.index,
           startOffset: 0,
           endOffset: min(1, text.length),
-          isVolume: chapter.isVolume,
         ),
-      );
-    }
-    final paginateElapsedMs =
-        (DateTime.now().microsecondsSinceEpoch - paginateStart) / 1000.0;
-    if (paginateElapsedMs >= 120 || pages.length >= 18) {
-      _logChapterSwitch(
-        'paginate chapter=${chapter.index} title="${chapter.title}" '
-        'chars=${text.length} pages=${pages.length} elapsedMs=${paginateElapsedMs.toStringAsFixed(1)}',
       );
     }
     return pages;
-  }
-
-  List<_TxtPage> _paginateChapterPagesApproximate(_TxtChapter chapter) {
-    final text = chapter.content;
-    _logChapterSwitch(
-      'paginate approx start chapter=${chapter.index} title="${chapter.title}" chars=${text.length}',
-    );
-    if (text.isEmpty) {
-      return [
-        _TxtPage(
-          title: chapter.title,
-          chapterIndex: chapter.index,
-          startOffset: 0,
-          endOffset: 0,
-          isVolume: chapter.isVolume,
-        ),
-      ];
-    }
-
-    final estimatedChars = _estimateCharsPerPage(
-      width: _contentMaxWidth,
-      height: _contentMaxHeight,
-    );
-    final firstPageChunk = max(120, (estimatedChars * 0.82).round());
-    final regularChunk = max(160, (estimatedChars * 1.02).round());
-    final pages = <_TxtPage>[];
-    final paginateStart = DateTime.now().microsecondsSinceEpoch;
-    var start = 0;
-    var isFirstPage = true;
-    var pageCount = 0;
-
-    while (start < text.length) {
-      if (pageCount == 0 || pageCount % 20 == 0) {
-        _logChapterSwitch(
-          'paginate approx progress chapter=${chapter.index} pageCount=$pageCount start=$start/${text.length}',
-        );
-      }
-      final preferred = min(
-        text.length,
-        start + (isFirstPage ? firstPageChunk : regularChunk),
-      );
-      final end = _findApproximatePageEnd(text, start, preferred);
-      pages.add(
-        _TxtPage(
-          title: chapter.title,
-          chapterIndex: chapter.index,
-          startOffset: start,
-          endOffset: end,
-          isVolume: chapter.isVolume,
-        ),
-      );
-      if (end <= start) {
-        break;
-      }
-      start = end;
-      isFirstPage = false;
-      pageCount++;
-    }
-
-    if (pages.isEmpty) {
-      pages.add(
-        _TxtPage(
-          title: chapter.title,
-          chapterIndex: chapter.index,
-          startOffset: 0,
-          endOffset: min(1, text.length),
-          isVolume: chapter.isVolume,
-        ),
-      );
-    }
-
-    final paginateElapsedMs =
-        (DateTime.now().microsecondsSinceEpoch - paginateStart) / 1000.0;
-    if (paginateElapsedMs >= 24) {
-      _logChapterSwitch(
-        'approx paginate chapter=${chapter.index} title="${chapter.title}" '
-        'chars=${text.length} pages=${pages.length} elapsedMs=${paginateElapsedMs.toStringAsFixed(1)}',
-      );
-    }
-    return pages;
-  }
-
-  int _findApproximatePageEnd(String text, int start, int preferredEnd) {
-    final length = text.length;
-    if (start >= length) {
-      return length;
-    }
-
-    final minChunk = min(length, start + 80);
-    var end = preferredEnd.clamp(start + 1, length);
-    final backwardBreak = text.lastIndexOf('\n', end - 1);
-    if (backwardBreak >= minChunk) {
-      return backwardBreak + 1;
-    }
-
-    final forwardBreak = text.indexOf('\n', end);
-    if (forwardBreak != -1 && forwardBreak <= min(length - 1, end + 120)) {
-      return forwardBreak + 1;
-    }
-
-    return end;
   }
 
   List<_TxtPage> _buildTxtPageWindowForLocation({
     required _TxtLocation location,
     List<_TxtChapter>? chapters,
     Map<int, _TxtChapter>? chapterByIndex,
-    bool precise = false,
-    bool includeAdjacentChapters = false,
   }) {
-    _logChapterSwitch(
-      'build window start chapter=${location.chapterIndex} offset=${location.offset} '
-      'precise=$precise includeAdjacent=$includeAdjacentChapters',
-    );
     final sourceChapters = chapters ?? _txtChapters;
     final sourceChapterByIndex = chapterByIndex ?? _txtChapterByIndex;
     if (sourceChapters.isEmpty || sourceChapterByIndex.isEmpty) {
@@ -4376,24 +3979,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     final pages = <_TxtPage>[];
-    final startPos = includeAdjacentChapters
-        ? max(0, currentPos - 1)
-        : currentPos;
-    final endPos = includeAdjacentChapters
-        ? min(sourceChapters.length - 1, currentPos + 1)
-        : currentPos;
+    final startPos = max(0, currentPos - 1);
+    final endPos = min(sourceChapters.length - 1, currentPos + 1);
     for (var pos = startPos; pos <= endPos; pos++) {
-      final chapter = sourceChapters[pos];
-      _logChapterSwitch(
-        'build window paginate pos=$pos chapter=${chapter.index} title="${chapter.title}" chars=${chapter.content.length}',
-      );
-      pages.addAll(
-        precise
-            ? _paginateChapterPages(chapter)
-            : _paginateChapterPagesApproximate(chapter),
-      );
+      pages.addAll(_paginateChapterPages(sourceChapters[pos]));
     }
-    _logChapterSwitch('build window done pages=${pages.length}');
     return pages;
   }
 
@@ -4428,7 +4018,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (chapter == null) {
       return;
     }
-    final additionalPages = _paginateChapterPagesApproximate(chapter);
+    final additionalPages = _paginateChapterPages(chapter);
     if (additionalPages.isEmpty) {
       return;
     }
@@ -4445,7 +4035,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (chapter == null) {
       return;
     }
-    final additionalPages = _paginateChapterPagesApproximate(chapter);
+    final additionalPages = _paginateChapterPages(chapter);
     if (additionalPages.isEmpty) {
       return;
     }
@@ -4473,31 +4063,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _TxtLocation location, {
     bool resetController = true,
     bool jumpToLastPage = false,
-    String traceSource = 'chapter_jump',
   }) {
     if (_txtChapters.isEmpty || _txtChapterByIndex.isEmpty) {
       return;
     }
-    final traceId = _beginChapterSwitchTrace(traceSource, location);
     final chapter = _txtChapterByIndex[location.chapterIndex];
     if (chapter == null) {
-      _logChapterSwitch('abort: chapter missing', traceId: traceId);
-      _completeChapterSwitchTrace('abort_missing_chapter', traceId: traceId);
       return;
     }
-    final windowStart = DateTime.now().microsecondsSinceEpoch;
-    final pages = _buildTxtPageWindowForLocation(
-      location: location,
-      precise: false,
-      includeAdjacentChapters: false,
-    );
-    _logChapterSwitch(
-      'window built pages=${pages.length} elapsedMs=${((DateTime.now().microsecondsSinceEpoch - windowStart) / 1000.0).toStringAsFixed(1)}',
-      traceId: traceId,
-    );
+    final pages = _buildTxtPageWindowForLocation(location: location);
     if (pages.isEmpty) {
-      _logChapterSwitch('abort: no pages built', traceId: traceId);
-      _completeChapterSwitchTrace('abort_no_pages', traceId: traceId);
       return;
     }
     final targetPage = jumpToLastPage
@@ -4518,10 +4093,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
 
     if (resetController) {
-      _logChapterSwitch(
-        'replace controller initialPage=$targetPage',
-        traceId: traceId,
-      );
       _replacePageController(targetPage);
     }
 
@@ -4531,30 +4102,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _currentTxtLocation = resolvedLocation;
       _currentPage = targetPage;
     });
-    _logChapterSwitch(
-      'state committed targetPage=$targetPage resolvedChapter=${resolvedLocation.chapterIndex} '
-      'resolvedOffset=${resolvedLocation.offset}',
-      traceId: traceId,
-    );
 
     if (resetController) {
-      _restorePageAfterBuild(targetPage, traceId: traceId);
-    } else {
-      _completeChapterSwitchTrace(
-        'state_commit_without_reset',
-        traceId: traceId,
-      );
+      _restorePageAfterBuild(targetPage);
     }
   }
 
   void _scheduleRepaginate({bool immediate = false}) {
     if (_txtChapters.isEmpty || _currentTxtLocation == null) {
-      return;
-    }
-    if (!_shouldRunPreciseRepagination) {
-      _logChapterSwitch(
-        'skip precise repaginate totalLength=$_txtTotalLength chapters=${_txtChapters.length}',
-      );
       return;
     }
     _repaginateDebounce?.cancel();
@@ -4576,11 +4131,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _txtChapterByIndex.isEmpty) {
       return;
     }
-    final pages = _buildTxtPageWindowForLocation(
-      location: location,
-      precise: true,
-      includeAdjacentChapters: false,
-    );
+    final pages = _buildTxtPageWindowForLocation(location: location);
     if (pages.isEmpty) {
       return;
     }
@@ -4669,193 +4220,39 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   List<InlineSpan> _buildPageTextSpans({
     required String text,
     required TextStyle bodyStyle,
+    String? chapterTitle,
     required bool startsAtParagraphBoundary,
     bool useWidgetIndent = true,
     int? highlightStart,
     int? highlightEnd,
   }) {
-    return _buildParagraphSpans(
-      text,
-      bodyStyle,
-      startsAtParagraphBoundary: startsAtParagraphBoundary,
-      useWidgetIndent: useWidgetIndent,
-      highlightStart: highlightStart,
-      highlightEnd: highlightEnd,
-    );
-  }
-
-  _ParsedChapterHeader _parseChapterHeader(String title) {
-    final trimmedTitle = title.trim();
-    if (trimmedTitle.isEmpty) {
-      return const _ParsedChapterHeader(number: '', name: '');
-    }
-
-    final match = RegExp(
-      r'^\s*(第\s*[0-9零一二三四五六七八九十百千万〇两]+\s*[章节卷部篇回集])(?:\s+|[:：·、.-]\s*)?(.*)$',
-    ).firstMatch(trimmedTitle);
-    if (match == null) {
-      return _ParsedChapterHeader(number: '', name: trimmedTitle);
-    }
-
-    final number = match.group(1)?.trim() ?? '';
-    final name = match.group(2)?.trim() ?? '';
-    if (number.isNotEmpty && name.isEmpty) {
-      return _ParsedChapterHeader(number: '', name: number);
-    }
-    return _ParsedChapterHeader(number: number, name: name);
-  }
-
-  Color get _chapterHeaderAccentColor => _isDarkReaderBackground
-      ? const Color(0xFFD7B07B)
-      : const Color(0xFFA06A35);
-
-  List<String> get _chapterHeaderArtFontFallback => const [
-    'STXingkai',
-    'Xingkai SC',
-    'HanziPen SC',
-    'HanziPen TC',
-    'STKaiti',
-    'Kaiti SC',
-    'KaiTi',
-    'DFKai-SB',
-    'Songti SC',
-    'Noto Serif CJK SC',
-    'serif',
-  ];
-
-  TextStyle _chapterHeaderNumberStyle(TextStyle bodyStyle) =>
-      bodyStyle.copyWith(
-        fontSize: _contentFontSize * 0.8,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.8,
-        color: _chapterHeaderAccentColor.withValues(alpha: 0.78),
-        height: 1.16,
-        fontFamilyFallback: _chapterHeaderArtFontFallback,
-      );
-
-  TextStyle _chapterHeaderNameStyle(TextStyle bodyStyle) => bodyStyle.copyWith(
-    fontSize: _contentFontSize * 1.3,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.45,
-    color: _chapterHeaderAccentColor,
-    height: 1.12,
-    fontStyle: FontStyle.italic,
-    fontFamilyFallback: _chapterHeaderArtFontFallback,
-  );
-
-  Widget _buildChapterHeader({
-    required String chapterTitle,
-    required TextStyle bodyStyle,
-  }) {
-    final header = _parseChapterHeader(chapterTitle);
-    final chapterName = header.name.isNotEmpty ? header.name : header.number;
-    if (chapterName.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final measuredHeight = _measureChapterHeaderHeight(
-          width: constraints.maxWidth,
-          bodyStyle: bodyStyle,
-          chapterTitle: chapterTitle,
-        );
-        final ornamentHeight = max(
-          _contentFontSize * 2.0,
-          measuredHeight - _chapterHeaderBottomSpacing,
-        );
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: _chapterHeaderBottomSpacing),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: _chapterHeaderOrnamentWidth,
-                height: ornamentHeight,
-                child: CustomPaint(
-                  painter: _ChapterHeaderOrnamentPainter(
-                    color: _chapterHeaderAccentColor,
-                  ),
-                ),
-              ),
-              const SizedBox(width: _chapterHeaderGap),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (header.number.isNotEmpty)
-                      Text(
-                        header.number,
-                        textScaler: TextScaler.noScaling,
-                        style: _chapterHeaderNumberStyle(bodyStyle),
-                      ),
-                    if (header.number.isNotEmpty)
-                      const SizedBox(height: _chapterHeaderLineSpacing),
-                    Text(
-                      chapterName,
-                      textScaler: TextScaler.noScaling,
-                      style: _chapterHeaderNameStyle(bodyStyle),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+    final spans = <InlineSpan>[];
+    final title = chapterTitle?.trim() ?? '';
+    if (title.isNotEmpty) {
+      spans.add(
+        TextSpan(
+          text: title,
+          style: bodyStyle.copyWith(
+            fontSize: _contentFontSize * 1.2,
+            fontWeight: FontWeight.w800,
+            height: _contentLineHeight + 0.12,
           ),
-        );
-      },
-    );
-  }
-
-  double _measureChapterHeaderHeight({
-    required double width,
-    required TextStyle bodyStyle,
-    required String chapterTitle,
-  }) {
-    final header = _parseChapterHeader(chapterTitle);
-    final chapterName = header.name.isNotEmpty ? header.name : header.number;
-    if (chapterName.isEmpty) {
-      return 0;
-    }
-
-    final textWidth = max(
-      0.0,
-      width - _chapterHeaderOrnamentWidth - _chapterHeaderGap,
-    );
-    if (textWidth <= 0) {
-      return 0;
-    }
-
-    final namePainter = TextPainter(
-      text: TextSpan(
-        text: chapterName,
-        style: _chapterHeaderNameStyle(bodyStyle),
-      ),
-      textDirection: TextDirection.ltr,
-      textScaler: TextScaler.noScaling,
-      maxLines: null,
-      textWidthBasis: TextWidthBasis.longestLine,
-      strutStyle: _contentStrutStyle,
-    )..layout(maxWidth: textWidth);
-
-    var totalHeight = namePainter.height;
-    if (header.number.isNotEmpty) {
-      final numberPainter = TextPainter(
-        text: TextSpan(
-          text: header.number,
-          style: _chapterHeaderNumberStyle(bodyStyle),
         ),
-        textDirection: TextDirection.ltr,
-        textScaler: TextScaler.noScaling,
-        maxLines: null,
-        textWidthBasis: TextWidthBasis.longestLine,
-        strutStyle: _contentStrutStyle,
-      )..layout(maxWidth: textWidth);
-      totalHeight += numberPainter.height + _chapterHeaderLineSpacing;
+      );
+      // chapter title spacing before body
+      spans.add(const TextSpan(text: '\n'));
     }
-
-    return totalHeight + _chapterHeaderBottomSpacing;
+    spans.addAll(
+      _buildParagraphSpans(
+        text,
+        bodyStyle,
+        startsAtParagraphBoundary: startsAtParagraphBoundary,
+        useWidgetIndent: useWidgetIndent,
+        highlightStart: highlightStart,
+        highlightEnd: highlightEnd,
+      ),
+    );
+    return spans;
   }
 
   List<InlineSpan> _buildHighlightedLineSpans({
@@ -5094,11 +4491,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (start >= length) {
       return length;
     }
-    if (length >= 12000 && (start == 0 || start % 20000 == 0)) {
-      _logChapterSwitch(
-        'pageEnd start=$start length=$length title="$chapterTitle"',
-      );
-    }
 
     final estimate = _estimateCharsPerPage(width: width, height: height);
     var chunkSize = max(256, estimate * 3);
@@ -5107,20 +4499,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     var end = min(length, start + chunkSize);
     final safeHeight = max(48.0, height - _paginationSafetyInset);
-    final showChapterHeader = start == 0;
-    final chapterHeaderHeight = showChapterHeader
-        ? _measureChapterHeaderHeight(
-            width: width,
-            bodyStyle: style,
-            chapterTitle: chapterTitle,
-          )
-        : 0.0;
-    final startsAtParagraphBoundary = _startsAtParagraphBoundary(
-      chapterText: text,
-      startOffset: start,
-    );
 
     bool fits(int candidateEnd) {
+      final showChapterHeader = start == 0;
       final isLastPageOfChapter = candidateEnd >= length;
       final endsAtParagraphBoundary = _endsAtParagraphBoundary(
         chapterText: text,
@@ -5139,14 +4520,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         endsAtParagraphBoundary: endsAtParagraphBoundary,
         isLastPageOfChapter: isLastPageOfChapter,
       );
-      final availableHeight = max(24.0, safeHeight - chapterHeaderHeight);
       final painter = TextPainter(
         text: TextSpan(
           style: style,
           children: _buildPageTextSpans(
             text: visibleText,
             bodyStyle: style,
-            startsAtParagraphBoundary: startsAtParagraphBoundary,
+            chapterTitle: showChapterHeader ? chapterTitle : null,
+            startsAtParagraphBoundary: _startsAtParagraphBoundary(
+              chapterText: text,
+              startOffset: start,
+            ),
             useWidgetIndent: false,
           ),
         ),
@@ -5158,7 +4542,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         strutStyle: _contentStrutStyle,
       );
       painter.layout(maxWidth: width);
-      return painter.height <= availableHeight;
+      return painter.height <= safeHeight;
     }
 
     if (!fits(start + 1)) {
@@ -5304,7 +4688,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     _loadTxtChapterAtLocation(
       _TxtLocation(chapterIndex: chapterIndex, offset: 0),
-      traceSource: 'toc_chapter',
     );
   }
 
@@ -5561,10 +4944,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return false;
     }
     return cjk / text.length >= 0.16;
-  }
-
-  bool get _shouldRunPreciseRepagination {
-    return _txtTotalLength <= 400000 && _txtChapters.length <= 180;
   }
 
   double _paragraphIndentWidthForText(String text) {
