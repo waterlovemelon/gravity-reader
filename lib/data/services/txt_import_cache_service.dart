@@ -10,12 +10,14 @@ class TxtImportCacheChapter {
   final String content;
   final int index;
   final int globalStart;
+  final bool isVolume;
 
   const TxtImportCacheChapter({
     required this.title,
     required this.content,
     required this.index,
     required this.globalStart,
+    this.isVolume = false,
   });
 
   factory TxtImportCacheChapter.fromJson(Map<String, dynamic> json) {
@@ -24,6 +26,7 @@ class TxtImportCacheChapter {
       content: json['content'] as String,
       index: json['index'] as int,
       globalStart: json['globalStart'] as int,
+      isVolume: json['isVolume'] as bool? ?? false,
     );
   }
 
@@ -33,6 +36,7 @@ class TxtImportCacheChapter {
       'content': content,
       'index': index,
       'globalStart': globalStart,
+      'isVolume': isVolume,
     };
   }
 }
@@ -84,6 +88,7 @@ Map<String, dynamic> buildTxtImportCachePayload(Map<String, dynamic> input) {
       'content': emptyContent,
       'index': 0,
       'globalStart': 0,
+      'isVolume': false,
     });
     totalLength = emptyContent.length;
   } else {
@@ -99,6 +104,7 @@ Map<String, dynamic> buildTxtImportCachePayload(Map<String, dynamic> input) {
         'content': body,
         'index': chapter.index,
         'globalStart': totalLength,
+        'isVolume': chapter.isVolume,
       });
       totalLength += body.length;
     }
@@ -109,6 +115,7 @@ Map<String, dynamic> buildTxtImportCachePayload(Map<String, dynamic> input) {
         'content': emptyContent,
         'index': 0,
         'globalStart': 0,
+        'isVolume': false,
       });
       totalLength = emptyContent.length;
     }
