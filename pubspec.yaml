@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
   
   # State Management
@@ -27,7 +29,7 @@ dependencies:
   # File Picker for iOS and Android
   file_picker: ^10.3.10
   image_picker: ^1.0.0
-  intl: ^0.19.0
+  intl: ^0.20.2
   charset_converter: ^2.3.0
   just_audio: ^0.10.4
   audio_session: ^0.2.1
@@ -38,6 +40,7 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  flutter_lints: ^5.0.0
 
   # Mocking
   mocktail: ^1.0.0

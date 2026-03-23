@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/domain/entities/book.dart';
-import 'package:myreader/domain/entities/reading_progress.dart';
-import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 
 class ReadingStatsState {
@@ -46,19 +45,14 @@ class ReadingStatsNotifier extends StateNotifier<ReadingStatsState> {
 
     try {
       final books = await _ref.read(getBooksUseCaseProvider)();
-      final allProgress = await _ref
-          .read(updateReadingProgressUseCaseProvider)
-          .call(
-            ReadingProgress(
-              bookId: '',
-              location: '',
-              percentage: 0,
-              lastReadAt: DateTime.now(),
-              readingTimeSeconds: 0,
-            ),
-          );
+      final allProgress = await _ref.read(
+        getAllReadingProgressUseCaseProvider,
+      )();
 
-      int totalMinutes = 0;
+      final totalReadingTimeSeconds = allProgress.values.fold<int>(
+        0,
+        (sum, progress) => sum + progress.readingTimeSeconds,
+      );
       int totalPages = 0;
 
       for (final book in books) {
@@ -69,7 +63,7 @@ class ReadingStatsNotifier extends StateNotifier<ReadingStatsState> {
 
       state = ReadingStatsState(
         totalBooksRead: books.length,
-        totalReadingTimeSeconds: totalMinutes * 60,
+        totalReadingTimeSeconds: totalReadingTimeSeconds,
         totalPagesRead: totalPages,
         dailyStats: _generateDailyStats(books),
         categoryBreakdown: _generateCategoryBreakdown(books),
@@ -102,7 +96,7 @@ class ReadingStatsNotifier extends StateNotifier<ReadingStatsState> {
     final breakdown = <String, int>{};
 
     for (final book in books) {
-      final category = book.categoryId ?? 'Uncategorized';
+      final category = book.categoryId ?? 'uncategorized';
       breakdown[category] = (breakdown[category] ?? 0) + 1;
     }
 
@@ -120,10 +114,20 @@ class StatsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen<ReadingStatsState>(readingStatsProvider, (_, __) {});
+    final notifier = ref.read(readingStatsProvider.notifier);
     final stats = ref.watch(readingStatsProvider);
 
+    if (!stats.isLoading && stats.dailyStats.isEmpty) {
+      Future.microtask(notifier.loadStats);
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Reading Statistics')),
+      appBar: AppBar(
+        title: Text(
+          LocaleText.of(context, zh: '阅读统计', en: 'Reading Statistics'),
+        ),
+      ),
       body: stats.isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -131,18 +135,22 @@ class StatsPage extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildSummaryCards(stats, ref),
+                  _buildSummaryCards(context, stats, ref),
                   const SizedBox(height: 24),
-                  _buildWeeklyChart(stats, ref),
+                  _buildWeeklyChart(context, stats, ref),
                   const SizedBox(height: 24),
-                  _buildCategoryBreakdown(stats, ref),
+                  _buildCategoryBreakdown(context, stats, ref),
                 ],
               ),
             ),
     );
   }
 
-  Widget _buildSummaryCards(ReadingStatsState stats, WidgetRef ref) {
+  Widget _buildSummaryCards(
+    BuildContext context,
+    ReadingStatsState stats,
+    WidgetRef ref,
+  ) {
     final theme = ref.watch(currentThemeProvider);
     return Row(
       children: [
@@ -150,7 +158,7 @@ class StatsPage extends ConsumerWidget {
           child: _StatCard(
             icon: Icons.book,
             value: '${stats.totalBooksRead}',
-            label: 'Books',
+            label: LocaleText.of(context, zh: '书籍', en: 'Books'),
             color: theme.primaryColor,
           ),
         ),
@@ -158,8 +166,8 @@ class StatsPage extends ConsumerWidget {
         Expanded(
           child: _StatCard(
             icon: Icons.timer,
-            value: _formatDuration(stats.totalReadingTimeSeconds),
-            label: 'Time',
+            value: _formatDuration(context, stats.totalReadingTimeSeconds),
+            label: LocaleText.of(context, zh: '时长', en: 'Time'),
             color: theme.accentColor,
           ),
         ),
@@ -168,7 +176,7 @@ class StatsPage extends ConsumerWidget {
           child: _StatCard(
             icon: Icons.auto_stories,
             value: '${stats.totalPagesRead}',
-            label: 'Pages',
+            label: LocaleText.of(context, zh: '页数', en: 'Pages'),
             color: theme.primaryColor,
           ),
         ),
@@ -176,16 +184,23 @@ class StatsPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildWeeklyChart(ReadingStatsState stats, WidgetRef ref) {
+  Widget _buildWeeklyChart(
+    BuildContext context,
+    ReadingStatsState stats,
+    WidgetRef ref,
+  ) {
     final theme = ref.watch(currentThemeProvider);
+    final labels = LocaleText.isChinese(context)
+        ? const ['一', '二', '三', '四', '五', '六', '日']
+        : const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'This Week',
+            Text(
+              LocaleText.of(context, zh: '本周', en: 'This Week'),
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
@@ -194,12 +209,15 @@ class StatsPage extends ConsumerWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 crossAxisAlignment: CrossAxisAlignment.end,
-                children: stats.dailyStats.map((day) {
+                children: stats.dailyStats.asMap().entries.map((entry) {
+                  final day = entry.value;
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Text(
-                        '${day.minutesRead}m',
+                        LocaleText.isChinese(context)
+                            ? '${day.minutesRead}分'
+                            : '${day.minutesRead}m',
                         style: const TextStyle(fontSize: 10),
                       ),
                       const SizedBox(height: 4),
@@ -207,6 +225,14 @@ class StatsPage extends ConsumerWidget {
                         width: 30,
                         height: day.minutesRead.toDouble(),
                         color: theme.primaryColor,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        labels[entry.key],
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: theme.secondaryTextColor,
+                        ),
                       ),
                     ],
                   );
@@ -219,7 +245,11 @@ class StatsPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategoryBreakdown(ReadingStatsState stats, WidgetRef ref) {
+  Widget _buildCategoryBreakdown(
+    BuildContext context,
+    ReadingStatsState stats,
+    WidgetRef ref,
+  ) {
     final theme = ref.watch(currentThemeProvider);
     if (stats.categoryBreakdown.isEmpty) {
       return const SizedBox.shrink();
@@ -231,8 +261,8 @@ class StatsPage extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Categories',
+            Text(
+              LocaleText.of(context, zh: '分类', en: 'Categories'),
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
@@ -247,7 +277,18 @@ class StatsPage extends ConsumerWidget {
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [Text(entry.key), Text('$percentage%')],
+                      children: [
+                        Text(
+                          entry.key == 'uncategorized'
+                              ? LocaleText.of(
+                                  context,
+                                  zh: '未分类',
+                                  en: 'Uncategorized',
+                                )
+                              : entry.key,
+                        ),
+                        Text('$percentage%'),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
@@ -267,10 +308,16 @@ class StatsPage extends ConsumerWidget {
     );
   }
 
-  String _formatDuration(int seconds) {
-    if (seconds < 60) return '${seconds}s';
-    if (seconds < 3600) return '${(seconds / 60).toInt()}m';
-    return '${(seconds / 3600).toInt()}h';
+  String _formatDuration(BuildContext context, int seconds) {
+    if (seconds < 60) {
+      return LocaleText.isChinese(context) ? '${seconds}秒' : '${seconds}s';
+    }
+    if (seconds < 3600) {
+      final minutes = (seconds / 60).toInt();
+      return LocaleText.isChinese(context) ? '${minutes}分' : '${minutes}m';
+    }
+    final hours = (seconds / 3600).toInt();
+    return LocaleText.isChinese(context) ? '${hours}小时' : '${hours}h';
   }
 }
 

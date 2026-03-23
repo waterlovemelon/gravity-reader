@@ -8,6 +8,7 @@ import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 
@@ -255,7 +256,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
 
   Future<void> _startSpeaking(String text, {int? actualStartOffset}) async {
     if (text.trim().isEmpty) {
-      _showToast('当前没有可播放内容');
+      _showToast(_text(zh: '当前没有可播放内容', en: 'No playable content'));
       return;
     }
     try {
@@ -281,7 +282,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
           );
       _startProgressTracking();
     } catch (_) {
-      _showToast('播放失败，请重试');
+      _showToast(_text(zh: '播放失败，请重试', en: 'Playback failed, please retry'));
     }
   }
 
@@ -303,7 +304,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
   Future<void> _startSpeakingFromOffset(int offset) async {
     final slice = _playbackSliceFromOffset(offset);
     if (slice.text.trim().isEmpty) {
-      _showToast('当前没有可播放内容');
+      _showToast(_text(zh: '当前没有可播放内容', en: 'No playable content'));
       return;
     }
     setState(() {
@@ -528,7 +529,11 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
     if (chapter.isNotEmpty) {
       return chapter;
     }
-    return '第 ${_currentPage + 1} 页';
+    return LocaleText.of(
+      context,
+      zh: '第 ${_currentPage + 1} 页',
+      en: 'Page ${_currentPage + 1}',
+    );
   }
 
   void _uiLog(String message) {
@@ -796,7 +801,11 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      '语速 ${tempRate.toStringAsFixed(2)}x',
+                      LocaleText.of(
+                        context,
+                        zh: '语速 ${tempRate.toStringAsFixed(2)}x',
+                        en: 'Speed ${tempRate.toStringAsFixed(2)}x',
+                      ),
                       style: TextStyle(
                         color: _textPrimary,
                         fontSize: 16,
@@ -805,7 +814,10 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '建议区间 0.9x - 1.3x',
+                      _text(
+                        zh: '建议区间 0.9x - 1.3x',
+                        en: 'Suggested range 0.9x - 1.3x',
+                      ),
                       style: TextStyle(color: _textTertiary, fontSize: 12),
                     ),
                     const SizedBox(height: 8),
@@ -885,7 +897,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                 Row(
                   children: [
                     Text(
-                      '选择音色',
+                      _text(zh: '选择音色', en: 'Choose Voice'),
                       style: TextStyle(
                         color: _textPrimary,
                         fontSize: 16,
@@ -915,7 +927,10 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                       ? Padding(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           child: Text(
-                            '未获取到音色列表，请检查 TTS 服务连接。',
+                            _text(
+                              zh: '未获取到音色列表，请检查 TTS 服务连接。',
+                              en: 'No voices loaded. Please check the TTS service connection.',
+                            ),
                             style: TextStyle(color: _textSecondary),
                           ),
                         )
@@ -958,7 +973,13 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                     return;
                                   }
                                   Navigator.pop(context);
-                                  _showToast('已切换为 $name');
+                                  _showToast(
+                                    LocaleText.of(
+                                      context,
+                                      zh: '已切换为 $name',
+                                      en: 'Switched to $name',
+                                    ),
+                                  );
                                 },
                                 child: Padding(
                                   padding: const EdgeInsets.fromLTRB(
@@ -999,11 +1020,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                                       Text(
                                         traits.isNotEmpty
                                             ? traits.join(' / ')
-                                            : (languageCode
-                                                      .toLowerCase()
-                                                      .startsWith('zh')
-                                                  ? '默认'
-                                                  : 'Default'),
+                                            : _text(zh: '默认', en: 'Default'),
                                         maxLines: 3,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -1109,7 +1126,10 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                     if (!canPlay) ...[
                       const SizedBox(height: 12),
                       Text(
-                        '当前页没有可播放文本',
+                        _text(
+                          zh: '当前页没有可播放文本',
+                          en: 'No playable text on this page',
+                        ),
                         style: TextStyle(color: _textTertiary, fontSize: 12),
                       ),
                     ],
@@ -1128,20 +1148,23 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       children: [
         _topIconButton(
           icon: Icons.keyboard_arrow_down_rounded,
-          tooltip: '收起听书',
+          tooltip: _text(zh: '收起听书', en: 'Close audiobook'),
           onTap: _closeWithSync,
         ),
         const Spacer(),
         _topIconButton(
           icon: Icons.share_outlined,
-          tooltip: '分享',
-          onTap: () => _showToast('分享功能即将支持'),
+          tooltip: _text(zh: '分享', en: 'Share'),
+          onTap: () =>
+              _showToast(_text(zh: '分享功能即将支持', en: 'Share is coming soon')),
         ),
         const SizedBox(width: 4),
         _topIconButton(
           icon: Icons.more_vert_rounded,
-          tooltip: '更多',
-          onTap: () => _showToast('更多功能即将支持'),
+          tooltip: _text(zh: '更多', en: 'More'),
+          onTap: () => _showToast(
+            _text(zh: '更多功能即将支持', en: 'More actions are coming soon'),
+          ),
         ),
       ],
     );
@@ -1374,12 +1397,14 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       children: [
         _metaAction(
           icon: Icons.timer_outlined,
-          label: '定时',
-          onTap: () => _showToast('定时关闭即将支持'),
+          label: _text(zh: '定时', en: 'Timer'),
+          onTap: () => _showToast(
+            _text(zh: '定时关闭即将支持', en: 'Sleep timer is coming soon'),
+          ),
         ),
         _metaAction(
           icon: Icons.record_voice_over_outlined,
-          label: '音色',
+          label: _text(zh: '音色', en: 'Voice'),
           onTap: () => _showVoicePickerSheet(ttsState),
         ),
         _metaAction(
@@ -1389,8 +1414,10 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         ),
         _metaAction(
           icon: Icons.format_list_bulleted_rounded,
-          label: '章节',
-          onTap: () => _showToast('章节列表即将支持'),
+          label: _text(zh: '章节', en: 'Chapters'),
+          onTap: () => _showToast(
+            _text(zh: '章节列表即将支持', en: 'Chapter list is coming soon'),
+          ),
         ),
       ],
     );
@@ -1454,7 +1481,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       children: [
         _transportButton(
           icon: Icons.keyboard_double_arrow_left_rounded,
-          tooltip: _isChapterMode ? '上一章' : '上一页',
+          tooltip: _isChapterMode
+              ? _text(zh: '上一章', en: 'Previous chapter')
+              : _text(zh: '上一页', en: 'Previous page'),
           onTap: _isChapterMode ? _goToPreviousChapter : _goToPreviousPage,
           enabled: !_isAtStart(),
           size: 22,
@@ -1562,7 +1591,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         const SizedBox(width: 12),
         _transportButton(
           icon: Icons.keyboard_double_arrow_right_rounded,
-          tooltip: _isChapterMode ? '下一章' : '下一页',
+          tooltip: _isChapterMode
+              ? _text(zh: '下一章', en: 'Next chapter')
+              : _text(zh: '下一页', en: 'Next page'),
           onTap: _isChapterMode ? _goToNextChapter : _goToNextPage,
           enabled: !_isAtEnd(),
           size: 22,
@@ -1639,7 +1670,9 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
       children: [
         _transportButton(
           icon: Icons.skip_previous_rounded,
-          tooltip: _isChapterMode ? '上一章' : '上一页',
+          tooltip: _isChapterMode
+              ? _text(zh: '上一章', en: 'Previous chapter')
+              : _text(zh: '上一页', en: 'Previous page'),
           onTap: _isChapterMode ? _goToPreviousChapter : _goToPreviousPage,
           enabled: !_isAtStart(),
           size: 34,
@@ -1698,13 +1731,19 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
         const SizedBox(width: 30),
         _transportButton(
           icon: Icons.skip_next_rounded,
-          tooltip: _isChapterMode ? '下一章' : '下一页',
+          tooltip: _isChapterMode
+              ? _text(zh: '下一章', en: 'Next chapter')
+              : _text(zh: '下一页', en: 'Next page'),
           onTap: _isChapterMode ? _goToNextChapter : _goToNextPage,
           enabled: !_isAtEnd(),
           size: 34,
         ),
       ],
     );
+  }
+
+  String _text({required String zh, required String en}) {
+    return LocaleText.of(context, zh: zh, en: en);
   }
 
   Widget _ambientGlow(double size) {

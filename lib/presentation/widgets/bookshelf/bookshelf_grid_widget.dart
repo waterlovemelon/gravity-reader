@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_card_widget.dart';
@@ -43,7 +44,7 @@ class BookshelfGridWidget extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'No books yet',
+                LocaleText.of(context, zh: '还没有书籍', en: 'No books yet'),
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -52,7 +53,11 @@ class BookshelfGridWidget extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Tap + to add your first book',
+                LocaleText.of(
+                  context,
+                  zh: '点击右上角 + 导入第一本书',
+                  en: 'Tap + to add your first book',
+                ),
                 style: TextStyle(color: theme.secondaryTextColor),
               ),
             ],
@@ -68,7 +73,7 @@ class BookshelfGridWidget extends ConsumerWidget {
           crossAxisCount: 3,
           childAspectRatio: 0.58,
           crossAxisSpacing: 16,
-          mainAxisSpacing: 18,
+          mainAxisSpacing: 12,
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final book = books[index];

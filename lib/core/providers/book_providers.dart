@@ -52,13 +52,61 @@ class BooksNotifier extends StateNotifier<BooksState> {
   Future<void> searchBooks(String query) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final searchBooks = _ref.read(searchBooksUseCaseProvider);
-      final books = await searchBooks(query);
-      final sortedBooks = await _applySort(books, state.sortMode);
+      final getBooks = _ref.read(getBooksUseCaseProvider);
+      final books = await getBooks();
+      final filteredBooks = _filterBooks(books, query);
+      final sortedBooks = await _applySort(filteredBooks, state.sortMode);
       state = state.copyWith(books: sortedBooks, isLoading: false);
     } catch (e) {
       state = state.copyWith(error: e.toString(), isLoading: false);
     }
+  }
+
+  List<Book> _filterBooks(List<Book> books, String query) {
+    final normalizedQuery = _normalizeSearchText(query);
+    if (normalizedQuery.isEmpty) {
+      return books;
+    }
+
+    return books
+        .where((book) {
+          final title = _normalizeSearchText(book.title);
+          final author = _normalizeSearchText(book.author ?? '');
+          final combined = _normalizeSearchText(
+            '${book.title} ${book.author ?? ''}',
+          );
+          return _matchesQuery(title, normalizedQuery) ||
+              _matchesQuery(author, normalizedQuery) ||
+              _matchesQuery(combined, normalizedQuery);
+        })
+        .toList(growable: false);
+  }
+
+  bool _matchesQuery(String candidate, String query) {
+    if (candidate.isEmpty || query.isEmpty) {
+      return false;
+    }
+    return candidate.contains(query) || _isSubsequenceMatch(candidate, query);
+  }
+
+  bool _isSubsequenceMatch(String candidate, String query) {
+    var queryIndex = 0;
+    for (var i = 0; i < candidate.length; i++) {
+      if (candidate[i] == query[queryIndex]) {
+        queryIndex++;
+        if (queryIndex == query.length) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  String _normalizeSearchText(String value) {
+    return value.toLowerCase().replaceAll(
+      RegExp(r'[\s\-_.,:;!?，。、《》“”‘’"()（）\[\]【】]+'),
+      '',
+    );
   }
 
   Future<void> setSortMode(BookSortMode mode) async {

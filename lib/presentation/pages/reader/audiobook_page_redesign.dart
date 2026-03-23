@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/domain/entities/book.dart';
 
 /// 听书界面改进设计方案
@@ -57,15 +58,11 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
   late final Color _bgTop;
   late final Color _bgBottom;
   late final Color _primaryBlue;
-  late final Color _primaryBlueSoft;
   late final Color _accentGlow;
 
-  Timer? _progressTimer;
   late final AnimationController _discController;
   bool _isDiscSpinning = false;
   int _currentPage = 0;
-  int? _pageBeforeDrag;
-  int? _offsetBeforeDrag;
   int _currentOffset = 0;
 
   bool get _isChapterMode =>
@@ -84,7 +81,6 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     _bgTop = theme.audiobookBgTop;
     _bgBottom = Color(0xFFF1F4EE); // 薄荷奶白 - 听书页专用背景
     _primaryBlue = theme.primaryColor; // 使用主题主色（鼠尾草绿）
-    _primaryBlueSoft = theme.primaryColor.withOpacity(0.1); // 降低透明度，更清新
     _accentGlow = theme.accentColor;
   }
 
@@ -102,7 +98,6 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   @override
   void dispose() {
-    _progressTimer?.cancel();
     _discController.dispose();
     try {
       ref.read(ttsProvider.notifier).stop();
@@ -110,21 +105,8 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     super.dispose();
   }
 
-  Future<void> _startSpeaking(String text) async {
-    // Implementation same as original
-  }
-
-  void _startProgressTracking() {
-    // Implementation same as original
-  }
-
   Future<void> _togglePlayback(TtsAppState ttsState) async {
     // Implementation same as original
-  }
-
-  void _stopSpeaking() {
-    ref.read(ttsProvider.notifier).stop();
-    _progressTimer?.cancel();
   }
 
   Future<void> _seekByChars(int delta) async {
@@ -152,7 +134,11 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     final rate = ttsState.speechRate.clamp(0.5, 2.0);
     final title = widget.chapterTitle?.trim().isNotEmpty == true
         ? widget.chapterTitle!
-        : '第 ${_currentPage + 1} 页';
+        : LocaleText.of(
+            context,
+            zh: '第 ${_currentPage + 1} 页',
+            en: 'Page ${_currentPage + 1}',
+          );
     final canPlay = _isChapterMode
         ? _chapterText.trim().isNotEmpty
         : (ttsState.currentText?.trim().isNotEmpty == true) ||
@@ -248,12 +234,15 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         const Spacer(),
         _iconButton(
           icon: Icons.share_outlined,
-          onTap: () => _showToast('分享功能即将支持'),
+          onTap: () =>
+              _showToast(_text(zh: '分享功能即将支持', en: 'Share is coming soon')),
           size: 24,
         ),
         _iconButton(
           icon: Icons.more_vert_rounded,
-          onTap: () => _showToast('更多功能即将支持'),
+          onTap: () => _showToast(
+            _text(zh: '更多功能即将支持', en: 'More actions are coming soon'),
+          ),
           size: 24,
         ),
       ],
@@ -291,7 +280,6 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   /// 唱片封面（带旋转动画）
   Widget _buildBookCover() {
-    final theme = ref.read(currentThemeProvider);
     final discSize = MediaQuery.of(context).size.width * 0.52;
     final discSizeClamped = discSize.clamp(200.0, 280.0);
     final coverPath = widget.book.coverPath;
@@ -354,7 +342,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 turns: _discController,
                 child: hasCover
                     ? Image.file(
-                        coverFile!,
+                        coverFile,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
                       )
@@ -395,7 +383,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          '当前页没有可播放文本',
+          _text(zh: '当前页没有可播放文本', en: 'No playable text on this page'),
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.6),
             fontSize: 12,
@@ -419,7 +407,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           ),
           SizedBox(width: 8),
           Text(
-            '正在加载音频...',
+            _text(zh: '正在加载音频...', en: 'Loading audio...'),
             style: TextStyle(
               color: _accentGlow,
               fontSize: 13,
@@ -454,7 +442,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             ),
             const SizedBox(width: 8),
             Text(
-              '播放中',
+              _text(zh: '播放中', en: 'Playing'),
               style: TextStyle(
                 color: _accentGlow,
                 fontSize: 13,
@@ -478,7 +466,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           children: [
             const SizedBox(width: 4),
             Text(
-              '已暂停',
+              _text(zh: '已暂停', en: 'Paused'),
               style: TextStyle(
                 color: ref.read(currentThemeProvider).secondaryTextColor, // 深灰绿
                 fontSize: 13,
@@ -501,12 +489,14 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
       children: [
         _secondaryActionButton(
           icon: Icons.timer_outlined,
-          label: '定时',
-          onTap: () => _showToast('定时关闭即将支持'),
+          label: _text(zh: '定时', en: 'Timer'),
+          onTap: () => _showToast(
+            _text(zh: '定时关闭即将支持', en: 'Sleep timer is coming soon'),
+          ),
         ),
         _secondaryActionButton(
           icon: Icons.record_voice_over_outlined,
-          label: '音色',
+          label: _text(zh: '音色', en: 'Voice'),
           onTap: () => _showVoicePickerSheet(ttsState),
         ),
         _secondaryActionButton(
@@ -516,8 +506,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         ),
         _secondaryActionButton(
           icon: Icons.list_rounded,
-          label: '章节',
-          onTap: () => _showToast('章节列表即将支持'),
+          label: _text(zh: '章节', en: 'Chapters'),
+          onTap: () => _showToast(
+            _text(zh: '章节列表即将支持', en: 'Chapter list is coming soon'),
+          ),
         ),
       ],
     );
@@ -591,8 +583,16 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             children: [
               Text(
                 _isChapterMode
-                    ? '章节 ${(ratio * 100).toStringAsFixed(0)}%'
-                    : '第 ${_currentPage + 1} / ${_safeTotalPages} 页',
+                    ? LocaleText.of(
+                        context,
+                        zh: '章节 ${(ratio * 100).toStringAsFixed(0)}%',
+                        en: 'Chapter ${(ratio * 100).toStringAsFixed(0)}%',
+                      )
+                    : LocaleText.of(
+                        context,
+                        zh: '第 ${_currentPage + 1} / ${_safeTotalPages} 页',
+                        en: 'Page ${_currentPage + 1} / $_safeTotalPages',
+                      ),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 13,
@@ -654,6 +654,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         ),
       ],
     );
+  }
+
+  String _text({required String zh, required String en}) {
+    return LocaleText.of(context, zh: zh, en: en);
   }
 
   /// [改进] 主要播放控件 - 快退、播放、快进
