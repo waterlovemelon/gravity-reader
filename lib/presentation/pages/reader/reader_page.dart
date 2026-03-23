@@ -17,6 +17,7 @@ import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
@@ -260,8 +261,12 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: TextField(
                         controller: _searchController,
-                        decoration: const InputDecoration(
-                          hintText: '搜本书',
+                        decoration: InputDecoration(
+                          hintText: LocaleText.of(
+                            context,
+                            zh: '搜本书',
+                            en: 'Search this book',
+                          ),
                           border: InputBorder.none,
                           isDense: true,
                         ),
@@ -278,9 +283,15 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
                         onSubmitted: (_) {
                           if (filtered.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('未找到匹配的章节'),
-                                duration: Duration(seconds: 2),
+                              SnackBar(
+                                content: Text(
+                                  LocaleText.of(
+                                    context,
+                                    zh: '未找到匹配的章节',
+                                    en: 'No matching chapter found',
+                                  ),
+                                ),
+                                duration: const Duration(seconds: 2),
                               ),
                             );
                             return;
@@ -307,7 +318,7 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
                     ),
                     alignment: Alignment.center,
                     child: Text(
-                      '目录',
+                      LocaleText.of(context, zh: '目录', en: 'Contents'),
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: widget.textColor,
@@ -322,7 +333,11 @@ class _TableOfContentsSheetState extends State<_TableOfContentsSheet> {
               child: filtered.isEmpty
                   ? Center(
                       child: Text(
-                        '未找到匹配章节',
+                        LocaleText.of(
+                          context,
+                          zh: '未找到匹配章节',
+                          en: 'No matching chapters',
+                        ),
                         style: TextStyle(
                           color: widget.textColor.withOpacity(0.72),
                         ),
@@ -539,7 +554,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               : const Center(child: CircularProgressIndicator()),
           error: (error, stack) => widget.initialBook != null
               ? _buildReader(widget.initialBook)
-              : Center(child: Text('Error: $error')),
+              : Center(
+                  child: Text(
+                    LocaleText.of(
+                      context,
+                      zh: '加载失败: $error',
+                      en: 'Error: $error',
+                    ),
+                  ),
+                ),
         ),
       ),
     );
@@ -807,7 +830,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
       final sourceFile = File(pickedPath);
       if (!await sourceFile.exists()) {
-        throw Exception('图片文件不存在');
+        throw Exception(_text(zh: '图片文件不存在', en: 'Image file not found'));
       }
 
       final backgroundDir = await _readerBackgroundsDirectoryPath();
@@ -843,15 +866,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('正文背景图片已更新')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _text(zh: '正文背景图片已更新', en: 'Reader background updated'),
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('选择背景图片失败: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${_text(zh: '选择背景图片失败', en: 'Failed to choose background image')}: $e',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -886,7 +917,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Widget _buildReader(Book? book) {
     if (book == null) {
-      return const Center(child: Text('Book not found'));
+      return Center(
+        child: Text(_text(zh: '未找到书籍', en: 'Book not found')),
+      );
     }
 
     if (_isTxtBook(book) &&
@@ -1096,7 +1129,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '正在打开《${book.title}》',
+                        _text(
+                          zh: '正在打开《${book.title}》',
+                          en: 'Opening "${book.title}"',
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1154,7 +1190,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  '正在恢复阅读进度',
+                                  _text(
+                                    zh: '正在恢复阅读进度',
+                                    en: 'Restoring reading progress',
+                                  ),
                                   style: TextStyle(
                                     color: _textColor.withOpacity(0.6),
                                     fontSize: 13,
@@ -1429,10 +1468,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     active: _activePanel == _ReaderPanel.notes,
                     onTap: () => _openPanel(_ReaderPanel.notes, () async {
                       await _showReaderActionPanel(
-                        title: '笔记',
-                        child: const Padding(
+                        title: _text(zh: '笔记', en: 'Notes'),
+                        child: Padding(
                           padding: EdgeInsets.only(top: 6),
-                          child: Text('暂无笔记，长按正文即可添加。'),
+                          child: Text(
+                            _text(
+                              zh: '暂无笔记，长按正文即可添加。',
+                              en: 'No notes yet. Long press the text to add one.',
+                            ),
+                          ),
                         ),
                       );
                     }),
@@ -1599,7 +1643,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final isTxt = _isTxtBook(book);
     final progressValue = _currentProgressPercent.clamp(0.0, 1.0);
     await _showReaderActionPanel(
-      title: '阅读进度',
+      title: _text(zh: '阅读进度', en: 'Reading Progress'),
       child: Column(
         children: [
           const SizedBox(height: 10),
@@ -1607,10 +1651,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             children: [
               _metricCell(
                 '${(progressValue * 100).toStringAsFixed(1)}%',
-                '约21小时后读完',
+                _text(zh: '约21小时后读完', en: 'About 21 hours left'),
               ),
-              _metricCell('18 分钟', '阅读时长'),
-              _metricCell('0 条', '笔记'),
+              _metricCell(
+                LocaleText.of(context, zh: '18 分钟', en: '18 min'),
+                _text(zh: '阅读时长', en: 'Reading Time'),
+              ),
+              _metricCell(
+                LocaleText.of(context, zh: '0 条', en: '0'),
+                _text(zh: '笔记', en: 'Notes'),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1630,9 +1680,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           const SizedBox(height: 6),
           Row(
             children: [
-              Expanded(child: _actionPill('阅读明细')),
+              Expanded(
+                child: _actionPill(_text(zh: '阅读明细', en: 'Reading Details')),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: _actionPill('开启自动翻页')),
+              Expanded(
+                child: _actionPill(
+                  _text(zh: '开启自动翻页', en: 'Enable Auto Page Turn'),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -1644,7 +1700,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               });
               _updateAutoPageTimer(totalPages);
             },
-            title: Text('自动翻页', style: TextStyle(color: _textColor)),
+            title: Text(
+              _text(zh: '自动翻页', en: 'Auto Page Turn'),
+              style: TextStyle(color: _textColor),
+            ),
             dense: true,
           ),
         ],
@@ -1706,7 +1765,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         const SizedBox(height: 10),
                         Center(
                           child: Text(
-                            '亮度与正文背景',
+                            _text(zh: '亮度与正文背景', en: 'Brightness & Background'),
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -1756,7 +1815,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
-                                          '亮度',
+                                          _text(zh: '亮度', en: 'Brightness'),
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w600,
@@ -1860,14 +1919,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           ),
                         ),
                         const SizedBox(height: 18),
-                        _themeSectionTitle('纯色背景'),
+                        _themeSectionTitle(
+                          _text(zh: '纯色背景', en: 'Solid Background'),
+                        ),
                         const SizedBox(height: 10),
                         _buildPresetThemeStrip(
                           presetThemeScrollController,
                           setModalState,
                         ),
                         const SizedBox(height: 18),
-                        _themeSectionTitle('自定义图片'),
+                        _themeSectionTitle(
+                          _text(zh: '自定义图片', en: 'Custom Image'),
+                        ),
                         const SizedBox(height: 10),
                         _buildCustomBackgroundPreviewCard(),
                         const SizedBox(height: 12),
@@ -1876,8 +1939,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             Expanded(
                               child: _modernActionButton(
                                 label: _isPickingBackgroundImage
-                                    ? '选择中...'
-                                    : '更换图片',
+                                    ? _text(zh: '选择中...', en: 'Selecting...')
+                                    : _text(zh: '更换图片', en: 'Change Image'),
                                 isSecondary: false,
                                 icon: Icons.photo_library_outlined,
                                 onTap: _isPickingBackgroundImage
@@ -1893,7 +1956,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             const SizedBox(width: 12),
                             Expanded(
                               child: _modernActionButton(
-                                label: '恢复纯色',
+                                label: _text(zh: '恢复纯色', en: 'Restore Solid'),
                                 isSecondary: true,
                                 icon: Icons.layers_clear_outlined,
                                 onTap: _isCustomBackgroundActive
@@ -1908,7 +1971,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         ),
                         const SizedBox(height: 14),
                         _buildBackgroundControlCard(
-                          title: '显示方式',
+                          title: _text(zh: '显示方式', en: 'Display Mode'),
                           subtitle: _backgroundImageFitLabel,
                           enabled: _isCustomBackgroundActive,
                           child: Wrap(
@@ -1916,17 +1979,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             runSpacing: 10,
                             children: [
                               _backgroundFitChip(
-                                label: '填充',
+                                label: _text(zh: '填充', en: 'Fill'),
                                 fit: _ReaderBackgroundImageFit.cover,
                                 onChanged: setModalState,
                               ),
                               _backgroundFitChip(
-                                label: '适应',
+                                label: _text(zh: '适应', en: 'Fit'),
                                 fit: _ReaderBackgroundImageFit.contain,
                                 onChanged: setModalState,
                               ),
                               _backgroundFitChip(
-                                label: '拉伸',
+                                label: _text(zh: '拉伸', en: 'Stretch'),
                                 fit: _ReaderBackgroundImageFit.fill,
                                 onChanged: setModalState,
                               ),
@@ -1935,7 +1998,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         ),
                         const SizedBox(height: 12),
                         _buildBackgroundControlCard(
-                          title: '遮罩强度',
+                          title: _text(zh: '遮罩强度', en: 'Overlay Strength'),
                           subtitle:
                               '${(_backgroundOverlayOpacity * 100).round()}%',
                           enabled: _isCustomBackgroundActive,
@@ -1957,7 +2020,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         ),
                         const SizedBox(height: 12),
                         _buildBackgroundControlCard(
-                          title: '背景模糊',
+                          title: _text(zh: '背景模糊', en: 'Background Blur'),
                           subtitle: _backgroundBlurSigma.toStringAsFixed(1),
                           enabled: _isCustomBackgroundActive,
                           child: _buildThemedSlider(
@@ -2058,11 +2121,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   String get _backgroundImageFitLabel {
     switch (_backgroundImageFit) {
       case _ReaderBackgroundImageFit.contain:
-        return '适应';
+        return _text(zh: '适应', en: 'Fit');
       case _ReaderBackgroundImageFit.fill:
-        return '拉伸';
+        return _text(zh: '拉伸', en: 'Stretch');
       case _ReaderBackgroundImageFit.cover:
-        return '填充';
+        return _text(zh: '填充', en: 'Fill');
     }
   }
 
@@ -2104,74 +2167,74 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             _ThemeOption(
               id: 0,
               color: const Color(0xFFF3F3F3),
-              name: '浅色',
+              name: _text(zh: '浅色', en: 'Light'),
               icon: Icons.light_mode_rounded,
             ),
             _ThemeOption(
               id: 1,
               color: const Color(0xFFE8E2D6),
-              name: '米色',
+              name: _text(zh: '米色', en: 'Beige'),
               icon: Icons.brightness_4_rounded,
             ),
             _ThemeOption(
               id: 2,
               color: const Color(0xFFF1F4EE),
-              name: '薄荷绿',
+              name: _text(zh: '薄荷绿', en: 'Mint'),
               icon: Icons.emoji_nature_rounded,
             ),
             _ThemeOption(
               id: 3,
               color: const Color(0xFFA6C39D),
-              name: '浅绿',
+              name: _text(zh: '浅绿', en: 'Soft Green'),
               icon: Icons.nature_rounded,
             ),
             _ThemeOption(
               id: 4,
               color: const Color(0xFFF5ECD7),
-              name: '羊皮纸',
+              name: _text(zh: '羊皮纸', en: 'Parchment'),
               icon: Icons.auto_stories_rounded,
             ),
             _ThemeOption(
               id: 5,
               color: const Color(0xFFE3EBF2),
-              name: '雾蓝',
+              name: _text(zh: '雾蓝', en: 'Mist Blue'),
               icon: Icons.water_drop_outlined,
             ),
             _ThemeOption(
               id: 6,
               color: const Color(0xFFF5E8EA),
-              name: '玫瑰粉',
+              name: _text(zh: '玫瑰粉', en: 'Rose Pink'),
               icon: Icons.local_florist_outlined,
             ),
             _ThemeOption(
               id: 7,
               color: const Color(0xFFFFF8E7),
-              name: '奶油黄',
+              name: _text(zh: '奶油黄', en: 'Cream Yellow'),
               icon: Icons.wb_sunny_outlined,
             ),
             // 夜晚模式 (4种)
             _ThemeOption(
               id: 8,
               color: const Color(0xFF121212),
-              name: '深灰',
+              name: _text(zh: '深灰', en: 'Dark Gray'),
               icon: Icons.dark_mode_rounded,
             ),
             _ThemeOption(
               id: 9,
               color: const Color(0xFF1A1B26),
-              name: '深靛',
+              name: _text(zh: '深靛', en: 'Deep Indigo'),
               icon: Icons.nights_stay_outlined,
             ),
             _ThemeOption(
               id: 10,
               color: const Color(0xFF1C1C1C),
-              name: '深咖',
+              name: _text(zh: '深咖', en: 'Dark Brown'),
               icon: Icons.coffee_outlined,
             ),
             _ThemeOption(
               id: 11,
               color: const Color(0xFF1A2A1F),
-              name: '墨绿',
+              name: _text(zh: '墨绿', en: 'Ink Green'),
               icon: Icons.forest_outlined,
             ),
           ][index];
@@ -2235,7 +2298,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       vertical: 12,
                     ),
                     child: Text(
-                      '正文预览\n风吹一页，光落一行。',
+                      _text(
+                        zh: '正文预览\n风吹一页，光落一行。',
+                        en: 'Preview\nA page turns, and light lands on each line.',
+                      ),
                       style: TextStyle(
                         color: _textColor,
                         height: 1.5,
@@ -2271,7 +2337,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '选择一张本地图片作为正文背景',
+                    _text(
+                      zh: '选择一张本地图片作为正文背景',
+                      en: 'Choose a local image for the reading background',
+                    ),
                     style: TextStyle(
                       color: _textColor.withOpacity(0.72),
                       fontSize: 13,
@@ -2303,7 +2372,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             children: [
               Expanded(
                 child: Text(
-                  hasImage ? '当前正文背景' : '未设置图片背景',
+                  hasImage
+                      ? _text(zh: '当前正文背景', en: 'Current Reading Background')
+                      : _text(zh: '未设置图片背景', en: 'No Image Background'),
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -2322,7 +2393,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    _isDarkReaderBackground ? '深图' : '浅图',
+                    _isDarkReaderBackground
+                        ? _text(zh: '深图', en: 'Dark')
+                        : _text(zh: '浅图', en: 'Light'),
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -2434,11 +2507,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _showTypographyPanel() async {
-    const paddingLabels = ['小', '边距', '大'];
-    const lineHeightLabels = ['紧', '行距', '松'];
+    final paddingLabels = [
+      _text(zh: '小', en: 'Small'),
+      _text(zh: '边距', en: 'Margin'),
+      _text(zh: '大', en: 'Large'),
+    ];
+    final lineHeightLabels = [
+      _text(zh: '紧', en: 'Tight'),
+      _text(zh: '行距', en: 'Line'),
+      _text(zh: '松', en: 'Loose'),
+    ];
 
     await _showReaderActionPanel(
-      title: '字体设置',
+      title: _text(zh: '字体设置', en: 'Typography'),
       child: StatefulBuilder(
         builder: (context, setModalState) {
           final fontSize = _fontSizePreset.clamp(16, 40);
@@ -2499,7 +2580,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            '字体大小',
+                            _text(zh: '字体大小', en: 'Font Size'),
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
@@ -2616,7 +2697,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 children: [
                   Expanded(
                     child: _modernSegmentCard(
-                      label: '边距',
+                      label: _text(zh: '边距', en: 'Margin'),
                       labels: paddingLabels,
                       selectedIndex: _paddingPreset,
                       onSelect: (index) => updateTypography(padding: index),
@@ -2626,7 +2707,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   const SizedBox(width: 12),
                   Expanded(
                     child: _modernSegmentCard(
-                      label: '行距',
+                      label: _text(zh: '行距', en: 'Line Height'),
                       labels: lineHeightLabels,
                       selectedIndex: lineHeightDisplayIndex,
                       onSelect: (index) {
@@ -2648,8 +2729,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 children: [
                   Expanded(
                     child: _modernSettingCard(
-                      title: '字体样式',
-                      subtitle: '默认', // TODO: Get current font style
+                      title: _text(zh: '字体样式', en: 'Font Style'),
+                      subtitle: _text(
+                        zh: '默认',
+                        en: 'Default',
+                      ), // TODO: Get current font style
                       icon: Icons.text_fields_rounded,
                       onTap: () async {
                         await _showFontStyleAndLayoutPanel();
@@ -2662,8 +2746,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   const SizedBox(width: 12),
                   Expanded(
                     child: _modernSettingCard(
-                      title: '首行设置',
-                      subtitle: _paragraphIndentEnabled ? '缩进' : '顶格',
+                      title: _text(zh: '首行设置', en: 'First Line'),
+                      subtitle: _paragraphIndentEnabled
+                          ? _text(zh: '缩进', en: 'Indent')
+                          : _text(zh: '顶格', en: 'Flush Left'),
                       icon: Icons.format_align_left_rounded,
                       onTap: () async {
                         await _showParagraphIndentPanel();
@@ -2681,7 +2767,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 children: [
                   Expanded(
                     child: _modernActionButton(
-                      label: '恢复默认',
+                      label: _text(zh: '恢复默认', en: 'Reset'),
                       isSecondary: false,
                       onTap: () {
                         setState(() {
@@ -2701,7 +2787,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   const SizedBox(width: 12),
                   Expanded(
                     child: _modernActionButton(
-                      label: '完成',
+                      label: _text(zh: '完成', en: 'Done'),
                       isSecondary: true,
                       onTap: () => Navigator.of(context).pop(),
                     ),
@@ -2946,20 +3032,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _showFontStyleAndLayoutPanel() async {
-    const styleOptions = ['默认', '衬线', '等宽'];
-    const alignOptions = ['自动', '两端', '左对齐', '居中'];
+    final styleOptions = [
+      _text(zh: '默认', en: 'Default'),
+      _text(zh: '衬线', en: 'Serif'),
+      _text(zh: '等宽', en: 'Mono'),
+    ];
+    final alignOptions = [
+      _text(zh: '自动', en: 'Auto'),
+      _text(zh: '两端', en: 'Justify'),
+      _text(zh: '左对齐', en: 'Left'),
+      _text(zh: '居中', en: 'Center'),
+    ];
     var draftStyle = _fontStylePreset;
     var draftAlign = _textAlignPreset;
 
     await _showReaderActionPanel(
-      title: '字体样式',
+      title: _text(zh: '字体样式', en: 'Font Style'),
       child: StatefulBuilder(
         builder: (context, setModalState) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 8),
-              _panelSubTitle('字体'),
+              _panelSubTitle(_text(zh: '字体', en: 'Font')),
               const SizedBox(height: 8),
               _segmentedChoices(
                 labels: styleOptions,
@@ -2970,7 +3065,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 },
               ),
               const SizedBox(height: 12),
-              _panelSubTitle('布局方式'),
+              _panelSubTitle(_text(zh: '布局方式', en: 'Layout')),
               const SizedBox(height: 8),
               _segmentedChoices(
                 labels: alignOptions,
@@ -2982,7 +3077,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               ),
               const SizedBox(height: 12),
               _actionPill(
-                '应用',
+                _text(zh: '应用', en: 'Apply'),
                 textColor: _textColor,
                 bgColor: _textColor.withOpacity(0.08),
                 onTap: () {
@@ -3003,11 +3098,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   Future<void> _showParagraphIndentPanel() async {
-    const options = ['首行缩进', '首行顶格'];
+    final options = [
+      _text(zh: '首行缩进', en: 'First-line indent'),
+      _text(zh: '首行顶格', en: 'Flush left'),
+    ];
     var draft = _paragraphIndentEnabled ? 0 : 1;
 
     await _showReaderActionPanel(
-      title: '首行顶格',
+      title: _text(zh: '首行设置', en: 'First Line'),
       child: StatefulBuilder(
         builder: (context, setModalState) {
           return Column(
@@ -3023,7 +3121,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               ),
               const SizedBox(height: 12),
               _actionPill(
-                '应用',
+                _text(zh: '应用', en: 'Apply'),
                 textColor: _textColor,
                 bgColor: _textColor.withOpacity(0.08),
                 onTap: () {
@@ -3859,7 +3957,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final total = _resolveTotalPages(book);
     return List<_TocEntry>.generate(
       total,
-      (index) => _TocEntry(title: '第${index + 1}页', pageIndex: index),
+      (index) => _TocEntry(
+        title: LocaleText.of(
+          context,
+          zh: '第${index + 1}页',
+          en: 'Page ${index + 1}',
+        ),
+        pageIndex: index,
+      ),
     );
   }
 
@@ -3899,7 +4004,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       toc.insert(
         0,
         _TocEntry(
-          title: _txtChapterByIndex[currentChapterIndex]?.title ?? '当前位置',
+          title:
+              _txtChapterByIndex[currentChapterIndex]?.title ??
+              _text(zh: '当前位置', en: 'Current Position'),
           pageIndex: 0,
           chapterIndex: currentChapterIndex,
         ),
@@ -5190,9 +5297,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _backgroundMode == _ReaderBackgroundMode.customImage) {
             _clearCustomBackgroundImage();
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('背景图片不可用，已恢复纯色背景')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _text(
+                    zh: '背景图片不可用，已恢复纯色背景',
+                    en: 'Background image unavailable. Restored solid background.',
+                  ),
+                ),
+              ),
+            );
           }
         });
         return ColoredBox(color: _readerBgColor);
@@ -5569,9 +5683,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   String? _getEpubPageText(Book book) {
     // TODO: 从EPUB中获取当前页面的文本
     // 这里暂时返回占位符文本
-    return '这是EPUB书籍的第${_currentPage + 1}页内容。\n\n'
-        '需要通过Flureadium集成来获取实际的EPUB文本内容。';
+    return LocaleText.isChinese(context)
+        ? '这是EPUB书籍的第${_currentPage + 1}页内容。\n\n需要通过Flureadium集成来获取实际的EPUB文本内容。'
+        : 'This is page ${_currentPage + 1} of the EPUB book.\n\nActual EPUB text requires Flureadium integration.';
   }
 
   EdgeInsets get mediaQueryPadding => MediaQuery.of(context).padding;
+
+  String _text({required String zh, required String en}) {
+    return LocaleText.of(context, zh: zh, en: en);
+  }
 }

@@ -4,6 +4,7 @@ import 'package:myreader/core/models/app_theme_data.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/presentation/pages/bookshelf/bookshelf_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
@@ -212,10 +213,16 @@ class ReadingTab extends ConsumerWidget {
     final theme = ref.watch(currentThemeProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('阅读')),
+      appBar: AppBar(
+        title: Text(LocaleText.of(context, zh: '阅读', en: 'Read')),
+      ),
       body: Center(
         child: Text(
-          '从书架中选择一本书开始阅读',
+          LocaleText.of(
+            context,
+            zh: '从书架中选择一本书开始阅读',
+            en: 'Pick a book from your library to start reading',
+          ),
           style: TextStyle(color: theme.secondaryTextColor),
         ),
       ),
@@ -240,7 +247,9 @@ class BookFriendsTab extends ConsumerWidget {
     final theme = ref.watch(currentThemeProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('书友')),
+      appBar: AppBar(
+        title: Text(LocaleText.of(context, zh: '书友', en: 'Community')),
+      ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -252,7 +261,11 @@ class BookFriendsTab extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              '书友动态即将上线',
+              LocaleText.of(
+                context,
+                zh: '书友动态即将上线',
+                en: 'Community feed is coming soon',
+              ),
               style: TextStyle(fontSize: 18, color: theme.secondaryTextColor),
             ),
           ],
@@ -293,7 +306,7 @@ class ProfileTab extends ConsumerWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '我也呢班打工仔',
+                    LocaleText.of(context, zh: '我也系打工仔', en: 'Office Worker'),
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
@@ -326,7 +339,11 @@ class ProfileTab extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '成为付费会员',
+                      LocaleText.of(
+                        context,
+                        zh: '成为付费会员',
+                        en: 'Become a premium member',
+                      ),
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: theme.textColor,
@@ -334,7 +351,11 @@ class ProfileTab extends ConsumerWidget {
                     ),
                   ),
                   Text(
-                    '立即开通 19 元/月',
+                    LocaleText.of(
+                      context,
+                      zh: '立即开通 19 元/月',
+                      en: 'Upgrade now for CNY 19/month',
+                    ),
                     style: TextStyle(
                       color: theme.secondaryTextColor,
                       fontSize: 12,
@@ -345,19 +366,27 @@ class ProfileTab extends ConsumerWidget {
             ),
             const SizedBox(height: 10),
             Row(
-              children: const [
+              children: [
                 Expanded(
                   child: _SimpleStatCard(
-                    title: '充值币',
-                    value: '余额 0.00',
+                    title: LocaleText.of(context, zh: '充值币', en: 'Coins'),
+                    value: LocaleText.of(
+                      context,
+                      zh: '余额 0.00',
+                      en: 'Balance 0.00',
+                    ),
                     icon: Icons.monetization_on_outlined,
                   ),
                 ),
                 SizedBox(width: 10),
                 Expanded(
                   child: _SimpleStatCard(
-                    title: '福利',
-                    value: '0天 | 赠币0.00',
+                    title: LocaleText.of(context, zh: '福利', en: 'Benefits'),
+                    value: LocaleText.of(
+                      context,
+                      zh: '0天 | 赠币0.00',
+                      en: '0 days | bonus 0.00',
+                    ),
                     icon: Icons.card_giftcard,
                   ),
                 ),
@@ -370,16 +399,36 @@ class ProfileTab extends ConsumerWidget {
                 children: [
                   _RowMetric(
                     theme: theme,
-                    title: '读书排行榜',
-                    value: '第 2 名',
-                    sub: '6 分钟中',
+                    title: LocaleText.of(
+                      context,
+                      zh: '读书排行榜',
+                      en: 'Reading Rank',
+                    ),
+                    value: LocaleText.of(context, zh: '第 2 名', en: '#2'),
+                    sub: LocaleText.of(
+                      context,
+                      zh: '6 分钟中',
+                      en: 'within 6 minutes',
+                    ),
                   ),
                   const Divider(height: 18),
                   _RowMetric(
                     theme: theme,
-                    title: '阅读时长',
-                    value: '1935 小时 38 分钟',
-                    sub: '本月 6 分钟',
+                    title: LocaleText.of(
+                      context,
+                      zh: '阅读时长',
+                      en: 'Reading Time',
+                    ),
+                    value: LocaleText.of(
+                      context,
+                      zh: '1935 小时 38 分钟',
+                      en: '1935 h 38 m',
+                    ),
+                    sub: LocaleText.of(
+                      context,
+                      zh: '本月 6 分钟',
+                      en: '6 min this month',
+                    ),
                   ),
                 ],
               ),
@@ -392,25 +441,29 @@ class ProfileTab extends ConsumerWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               childAspectRatio: 2.7,
-              children: const [
+              children: [
                 _SimpleStatCard(
-                  title: '在读',
-                  value: '累计 60 本',
+                  title: LocaleText.of(context, zh: '在读', en: 'Reading'),
+                  value: LocaleText.of(context, zh: '累计 60 本', en: '60 total'),
                   icon: Icons.east,
                 ),
                 _SimpleStatCard(
-                  title: '读完',
-                  value: '累计 16 本',
+                  title: LocaleText.of(context, zh: '读完', en: 'Finished'),
+                  value: LocaleText.of(context, zh: '累计 16 本', en: '16 total'),
                   icon: Icons.check_circle,
                 ),
                 _SimpleStatCard(
-                  title: '笔记',
-                  value: '累计 86 个',
+                  title: LocaleText.of(context, zh: '笔记', en: 'Notes'),
+                  value: LocaleText.of(context, zh: '累计 86 个', en: '86 total'),
                   icon: Icons.edit_note,
                 ),
                 _SimpleStatCard(
-                  title: '订阅',
-                  value: '已上架 1 本',
+                  title: LocaleText.of(context, zh: '订阅', en: 'Subscriptions'),
+                  value: LocaleText.of(
+                    context,
+                    zh: '已上架 1 本',
+                    en: '1 published',
+                  ),
                   icon: Icons.notifications,
                 ),
               ],
@@ -420,8 +473,8 @@ class ProfileTab extends ConsumerWidget {
               theme: theme,
               child: _RowMetric(
                 theme: theme,
-                title: '书单',
-                value: '1 个',
+                title: LocaleText.of(context, zh: '书单', en: 'Booklists'),
+                value: LocaleText.of(context, zh: '1 个', en: '1'),
                 sub: '',
               ),
             ),
@@ -430,9 +483,17 @@ class ProfileTab extends ConsumerWidget {
               theme: theme,
               child: _RowMetric(
                 theme: theme,
-                title: '关注',
-                value: '12 人关注我',
-                sub: '我关注了 13 人',
+                title: LocaleText.of(context, zh: '关注', en: 'Followers'),
+                value: LocaleText.of(
+                  context,
+                  zh: '12 人关注我',
+                  en: '12 follow me',
+                ),
+                sub: LocaleText.of(
+                  context,
+                  zh: '我关注了 13 人',
+                  en: 'Following 13',
+                ),
               ),
             ),
           ],

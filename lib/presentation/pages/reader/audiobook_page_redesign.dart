@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/models/tts_chapter_payload.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 
@@ -262,7 +263,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   Future<void> _startSpeaking(String text, {int? actualStartOffset}) async {
     if (text.trim().isEmpty) {
-      _showToast('当前没有可播放内容');
+      _showToast(_text(zh: '当前没有可播放内容', en: 'No playable content'));
       return;
     }
     try {
@@ -288,7 +289,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           );
       _startProgressTracking();
     } catch (_) {
-      _showToast('播放失败，请重试');
+      _showToast(_text(zh: '播放失败，请重试', en: 'Playback failed, please retry'));
     }
   }
 
@@ -310,7 +311,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
   Future<void> _startSpeakingFromOffset(int offset) async {
     final slice = _playbackSliceFromOffset(offset);
     if (slice.text.trim().isEmpty) {
-      _showToast('当前没有可播放内容');
+      _showToast(_text(zh: '当前没有可播放内容', en: 'No playable content'));
       return;
     }
     setState(() {
@@ -504,7 +505,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     if (chapter.isNotEmpty) {
       return chapter;
     }
-    return '第 ${_currentPage + 1} 页';
+    return _text(zh: '第 ${_currentPage + 1} 页', en: 'Page ${_currentPage + 1}');
   }
 
   void _maybePreloadNextChapter(TtsAppState ttsState) {
@@ -720,7 +721,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   String _sleepTimerLabel(Duration? remaining) {
     if (remaining == null || remaining <= Duration.zero) {
-      return '定时';
+      return _text(zh: '定时', en: 'Timer');
     }
     final totalMinutes = remaining.inMinutes;
     if (totalMinutes >= 60) {
@@ -739,15 +740,20 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     if (totalMinutes >= 60) {
       final hours = totalMinutes ~/ 60;
       final minutes = totalMinutes % 60;
-      return minutes == 0 ? '$hours 小时后停止' : '$hours 小时 $minutes 分后停止';
+      if (LocaleText.isChinese(context)) {
+        return minutes == 0 ? '$hours 小时后停止' : '$hours 小时 $minutes 分后停止';
+      }
+      return minutes == 0
+          ? 'Stops in ${hours}h'
+          : 'Stops in ${hours}h ${minutes}m';
     }
-    return '${math.max(1, totalMinutes)} 分钟后停止';
+    return LocaleText.isChinese(context)
+        ? '${math.max(1, totalMinutes)} 分钟后停止'
+        : 'Stops in ${math.max(1, totalMinutes)}m';
   }
 
   String _appLanguageCode() {
-    // The app UI is Chinese-only today, so voice metadata should stay aligned
-    // with the visible interface rather than the device locale.
-    return 'zh';
+    return Localizations.localeOf(context).languageCode.toLowerCase();
   }
 
   Future<void> _showTimerSheet() async {
@@ -772,7 +778,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 _buildSheetHandle(),
                 const SizedBox(height: 16),
                 Text(
-                  '定时关闭',
+                  _text(zh: '定时关闭', en: 'Sleep Timer'),
                   style: TextStyle(
                     color: _textPrimary,
                     fontSize: 18,
@@ -782,8 +788,14 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 const SizedBox(height: 6),
                 Text(
                   state.sleepTimerRemaining == null
-                      ? '选择自动停止播放的时间'
-                      : '当前已设置 ${_sleepTimerStatusText(state.sleepTimerRemaining)}',
+                      ? _text(
+                          zh: '选择自动停止播放的时间',
+                          en: 'Choose when playback should stop automatically',
+                        )
+                      : _text(
+                          zh: '当前已设置 ${_sleepTimerStatusText(state.sleepTimerRemaining)}',
+                          en: 'Current timer: ${_sleepTimerStatusText(state.sleepTimerRemaining)}',
+                        ),
                   style: TextStyle(color: _textSecondary, fontSize: 13),
                 ),
                 const SizedBox(height: 18),
@@ -794,7 +806,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                       .map((minutes) {
                         final selected = activeMinutes == minutes;
                         return _buildActionChip(
-                          label: '$minutes 分钟',
+                          label: LocaleText.isChinese(context)
+                              ? '$minutes 分钟'
+                              : '$minutes min',
                           selected: selected,
                           emphasized: minutes == 30 || minutes == 45,
                           onTap: () {
@@ -802,7 +816,11 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                                 .read(ttsProvider.notifier)
                                 .setSleepTimer(Duration(minutes: minutes));
                             Navigator.pop(context);
-                            _showToast('已设置 $minutes 分钟后停止');
+                            _showToast(
+                              LocaleText.isChinese(context)
+                                  ? '已设置 $minutes 分钟后停止'
+                                  : 'Sleep timer set for $minutes min',
+                            );
                           },
                         );
                       })
@@ -817,7 +835,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                         : () {
                             ref.read(ttsProvider.notifier).clearSleepTimer();
                             Navigator.pop(context);
-                            _showToast('已取消定时');
+                            _showToast(
+                              _text(zh: '已取消定时', en: 'Sleep timer cleared'),
+                            );
                           },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: _textPrimary,
@@ -826,7 +846,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    child: const Text('关闭定时'),
+                    child: Text(_text(zh: '关闭定时', en: 'Turn Off Timer')),
                   ),
                 ),
               ],
@@ -986,7 +1006,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 Row(
                   children: [
                     Text(
-                      '选择音色',
+                      _text(zh: '选择音色', en: 'Choose Voice'),
                       style: TextStyle(
                         color: _textPrimary,
                         fontSize: 18,
@@ -1006,7 +1026,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '列表已按当前书籍语言过滤，描述统一使用中文显示。',
+                  _text(
+                    zh: '列表已按当前书籍语言过滤。',
+                    en: 'Voices are filtered by the current book language.',
+                  ),
                   style: TextStyle(color: _textSecondary, fontSize: 13),
                 ),
                 const SizedBox(height: 12),
@@ -1023,7 +1046,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                       ? Padding(
                           padding: const EdgeInsets.symmetric(vertical: 18),
                           child: Text(
-                            '未获取到音色列表，请检查 TTS 服务连接。',
+                            _text(
+                              zh: '未获取到音色列表，请检查 TTS 服务连接。',
+                              en: 'No voices loaded. Please check the TTS service connection.',
+                            ),
                             style: TextStyle(color: _textSecondary),
                           ),
                         )
@@ -1060,7 +1086,13 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                                     return;
                                   }
                                   Navigator.pop(context);
-                                  _showToast('已切换为 $name');
+                                  _showToast(
+                                    LocaleText.of(
+                                      context,
+                                      zh: '已切换为 $name',
+                                      en: 'Switched to $name',
+                                    ),
+                                  );
                                 },
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -1142,7 +1174,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                                             Text(
                                               traits.isNotEmpty
                                                   ? traits.take(3).join(' / ')
-                                                  : '默认音色',
+                                                  : _text(
+                                                      zh: '默认音色',
+                                                      en: 'Default Voice',
+                                                    ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
@@ -1197,7 +1232,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
 
   Future<void> _showChapterSheet() async {
     if (_chapterQueue.isEmpty) {
-      _showToast('当前书籍还没有可用章节');
+      _showToast(_text(zh: '当前书籍还没有可用章节', en: 'No chapters available yet'));
       return;
     }
     await showModalBottomSheet<void>(
@@ -1221,7 +1256,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                 Row(
                   children: [
                     Text(
-                      '章节列表',
+                      _text(zh: '章节列表', en: 'Chapters'),
                       style: TextStyle(
                         color: _textPrimary,
                         fontSize: 18,
@@ -1230,7 +1265,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                     ),
                     const Spacer(),
                     Text(
-                      '${_chapterQueue.length} 章',
+                      LocaleText.isChinese(context)
+                          ? '${_chapterQueue.length} 章'
+                          : '${_chapterQueue.length} chapters',
                       style: TextStyle(color: _textSecondary, fontSize: 12),
                     ),
                   ],
@@ -1285,7 +1322,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                                 Expanded(
                                   child: Text(
                                     item.title.trim().isEmpty
-                                        ? '未命名章节 ${index + 1}'
+                                        ? _text(
+                                            zh: '未命名章节 ${index + 1}',
+                                            en: 'Untitled Chapter ${index + 1}',
+                                          )
                                         : item.title.trim(),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
@@ -1461,21 +1501,24 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
           icon: Icons.keyboard_arrow_down_rounded,
           onTap: _closeWithSync,
           size: 28,
-          tooltip: '收起听书',
+          tooltip: _text(zh: '收起听书', en: 'Close audiobook'),
         ),
         const Spacer(),
         _iconButton(
           icon: Icons.share_outlined,
-          onTap: () => _showToast('分享功能即将支持'),
+          onTap: () =>
+              _showToast(_text(zh: '分享功能即将支持', en: 'Share is coming soon')),
           size: 22,
-          tooltip: '分享',
+          tooltip: _text(zh: '分享', en: 'Share'),
         ),
         const SizedBox(width: 6),
         _iconButton(
           icon: Icons.more_horiz_rounded,
-          onTap: () => _showToast('更多功能即将支持'),
+          onTap: () => _showToast(
+            _text(zh: '更多功能即将支持', en: 'More actions are coming soon'),
+          ),
           size: 22,
-          tooltip: '更多',
+          tooltip: _text(zh: '更多', en: 'More'),
         ),
       ],
     );
@@ -1630,7 +1673,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         const SizedBox(width: 10),
         _secondaryActionButton(
           icon: Icons.record_voice_over_outlined,
-          label: '音色',
+          label: _text(zh: '音色', en: 'Voice'),
           onTap: () => _showVoicePickerSheet(ttsState),
         ),
         const SizedBox(width: 10),
@@ -1643,7 +1686,7 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         const SizedBox(width: 10),
         _secondaryActionButton(
           icon: Icons.format_list_bulleted_rounded,
-          label: '章节',
+          label: _text(zh: '章节', en: 'Chapters'),
           emphasized: _chapterQueue.isNotEmpty,
           onTap: _showChapterSheet,
         ),
@@ -1709,8 +1752,14 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
             Expanded(
               child: Text(
                 _isChapterMode
-                    ? '章节 ${(ratio * 100).toStringAsFixed(0)}%'
-                    : '第 ${_currentPage + 1} / ${_safeTotalPages} 页',
+                    ? _text(
+                        zh: '章节 ${(ratio * 100).toStringAsFixed(0)}%',
+                        en: 'Chapter ${(ratio * 100).toStringAsFixed(0)}%',
+                      )
+                    : _text(
+                        zh: '第 ${_currentPage + 1} / ${_safeTotalPages} 页',
+                        en: 'Page ${_currentPage + 1} / $_safeTotalPages',
+                      ),
                 style: TextStyle(
                   color: _textPrimary,
                   fontSize: 13,
@@ -1785,7 +1834,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
       children: [
         _primaryControlButton(
           icon: Icons.replay_10_rounded,
-          label: _isChapterMode ? '后退' : '上页',
+          label: _isChapterMode
+              ? _text(zh: '后退', en: 'Back')
+              : _text(zh: '上页', en: 'Previous'),
           onTap: _isChapterMode ? () => _seekByChars(-480) : _goToPreviousPage,
           enabled: !_isAtStart() && canPlay,
         ),
@@ -1794,7 +1845,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
         const SizedBox(width: 28),
         _primaryControlButton(
           icon: Icons.forward_10_rounded,
-          label: _isChapterMode ? '前进' : '下页',
+          label: _isChapterMode
+              ? _text(zh: '前进', en: 'Forward')
+              : _text(zh: '下页', en: 'Next'),
           onTap: _isChapterMode ? () => _seekByChars(480) : _goToNextPage,
           enabled: !_isAtEnd() && canPlay,
         ),
@@ -1941,5 +1994,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
     } else {
       _discController.stop();
     }
+  }
+
+  String _text({required String zh, required String en}) {
+    return LocaleText.of(context, zh: zh, en: en);
   }
 }

@@ -19,6 +19,7 @@ import 'package:myreader/core/providers/category_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/category.dart';
@@ -102,14 +103,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             ? TextField(
                 controller: _searchController,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: '搜索书名',
+                decoration: InputDecoration(
+                  hintText: _text(zh: '搜索书名或作者', en: 'Search title or author'),
                   border: InputBorder.none,
                 ),
                 onChanged: _handleSearchChanged,
               )
-            : const Text(
-                '书架',
+            : Text(
+                _text(zh: '书架', en: 'Library'),
                 style: TextStyle(
                   fontSize: 27,
                   fontWeight: FontWeight.w700,
@@ -120,7 +121,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
           TextButton(
             onPressed: _toggleSelectionMode,
             child: Text(
-              _isSelectionMode ? '完成' : '编辑',
+              _isSelectionMode
+                  ? _text(zh: '完成', en: 'Done')
+                  : _text(zh: '编辑', en: 'Edit'),
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 color: theme.textColor.withValues(alpha: 0.78),
@@ -173,7 +176,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                         Row(
                           children: [
                             Text(
-                              _isSearching ? '搜索结果' : '全部书籍',
+                              _isSearching
+                                  ? _text(zh: '搜索结果', en: 'Results')
+                                  : _text(zh: '全部书籍', en: 'All Books'),
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
@@ -225,7 +230,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                                     vertical: 6,
                                   ),
                                   child: Text(
-                                    allVisibleSelected ? '取消全选' : '全选',
+                                    allVisibleSelected
+                                        ? _text(zh: '取消全选', en: 'Clear All')
+                                        : _text(zh: '全选', en: 'Select All'),
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
@@ -263,13 +270,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              'Failed to load books',
+                              _text(zh: '加载书籍失败', en: 'Failed to load books'),
                               style: TextStyle(color: theme.secondaryTextColor),
                             ),
                             const SizedBox(height: 12),
                             FilledButton(
                               onPressed: _refreshShelf,
-                              child: const Text('Retry'),
+                              child: Text(_text(zh: '重试', en: 'Retry')),
                             ),
                           ],
                         ),
@@ -349,7 +356,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     }
     final action = await showGeneralDialog<_BookQuickAction>(
       context: context,
-      barrierLabel: 'Book context menu',
+      barrierLabel: _text(zh: '书籍菜单', en: 'Book menu'),
       barrierDismissible: true,
       barrierColor: Colors.black.withValues(alpha: 0.08),
       transitionDuration: const Duration(milliseconds: 220),
@@ -421,16 +428,20 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('批量删除'),
-        content: Text('确认删除已选的 $count 本书吗？'),
+        title: Text(_text(zh: '批量删除', en: 'Delete Selected')),
+        content: Text(
+          LocaleText.isChinese(context)
+              ? '确认删除已选的 $count 本书吗？'
+              : 'Delete $count selected books?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(_text(zh: '取消', en: 'Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
+            child: Text(_text(zh: '删除', en: 'Delete')),
           ),
         ],
       ),
@@ -458,16 +469,20 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('删除书籍'),
-        content: Text('确认删除《${book.title}》吗？'),
+        title: Text(_text(zh: '删除书籍', en: 'Delete Book')),
+        content: Text(
+          LocaleText.isChinese(context)
+              ? '确认删除《${book.title}》吗？'
+              : 'Delete "${book.title}"?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(_text(zh: '取消', en: 'Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
+            child: Text(_text(zh: '删除', en: 'Delete')),
           ),
         ],
       ),
@@ -498,8 +513,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                title: const Text(
-                  '排序方式',
+                title: Text(
+                  _text(zh: '排序方式', en: 'Sort By'),
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -542,9 +557,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const ListTile(
+              ListTile(
                 title: Text(
-                  '移动到分类',
+                  _text(zh: '移动到分类', en: 'Move To Category'),
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -553,7 +568,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                   borderRadius: BorderRadius.circular(16),
                 ),
                 leading: const Icon(Icons.add_circle_outline_rounded),
-                title: const Text('新建分类'),
+                title: Text(_text(zh: '新建分类', en: 'New Category')),
                 onTap: () => Navigator.pop(
                   context,
                   const _CategorySelectionResult.create(),
@@ -564,7 +579,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                   borderRadius: BorderRadius.circular(16),
                 ),
                 leading: const Icon(Icons.clear_all_rounded),
-                title: const Text('未分类'),
+                title: Text(_text(zh: '未分类', en: 'Uncategorized')),
                 onTap: () => Navigator.pop(
                   context,
                   const _CategorySelectionResult.existing(''),
@@ -636,7 +651,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       _isSelectionMode = false;
     });
     _showTopNotice(
-      message: categoryId == null ? '已移出分类' : '已更新书籍分类',
+      message: categoryId == null
+          ? _text(zh: '已移出分类', en: 'Removed from category')
+          : _text(zh: '已更新书籍分类', en: 'Book category updated'),
       kind: _TopNoticeKind.success,
     );
   }
@@ -646,17 +663,19 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final createdName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('新建分类'),
+        title: Text(_text(zh: '新建分类', en: 'New Category')),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 20,
-          decoration: const InputDecoration(hintText: '输入分类名称'),
+          decoration: InputDecoration(
+            hintText: _text(zh: '输入分类名称', en: 'Enter category name'),
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(_text(zh: '取消', en: 'Cancel')),
           ),
           TextButton(
             onPressed: () {
@@ -666,7 +685,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
               }
               Navigator.pop(context, name);
             },
-            child: const Text('创建'),
+            child: Text(_text(zh: '创建', en: 'Create')),
           ),
         ],
       ),
@@ -737,21 +756,23 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   }
 
   String _sortLabel(BookSortMode mode) {
-    return '按${_sortMenuLabel(mode)}';
+    return LocaleText.isChinese(context)
+        ? '按${_sortMenuLabel(mode)}'
+        : _sortMenuLabel(mode);
   }
 
   String _sortMenuLabel(BookSortMode mode) {
     switch (mode) {
       case BookSortMode.latestAdded:
-        return '最近导入';
+        return _text(zh: '最近导入', en: 'Recently Added');
       case BookSortMode.recentRead:
-        return '最近阅读';
+        return _text(zh: '最近阅读', en: 'Recently Read');
       case BookSortMode.progress:
-        return '阅读进度';
+        return _text(zh: '阅读进度', en: 'Progress');
       case BookSortMode.title:
-        return '书名';
+        return _text(zh: '书名', en: 'Title');
       case BookSortMode.author:
-        return '作者';
+        return _text(zh: '作者', en: 'Author');
     }
   }
 
@@ -821,7 +842,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                         Text(
                           book.author?.trim().isNotEmpty == true
                               ? book.author!
-                              : '未知作者',
+                              : _text(zh: '未知作者', en: 'Unknown Author'),
                           style: TextStyle(
                             fontSize: 13,
                             color: theme.secondaryTextColor,
@@ -833,26 +854,35 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                 ],
               ),
               const SizedBox(height: 20),
-              _BookMetaRow(label: '分类', value: categoryName),
               _BookMetaRow(
-                label: '总页数',
-                value: book.totalPages?.toString() ?? '未知',
+                label: _text(zh: '分类', en: 'Category'),
+                value: categoryName,
               ),
               _BookMetaRow(
-                label: '文件大小',
+                label: _text(zh: '总页数', en: 'Pages'),
+                value:
+                    book.totalPages?.toString() ??
+                    _text(zh: '未知', en: 'Unknown'),
+              ),
+              _BookMetaRow(
+                label: _text(zh: '文件大小', en: 'File Size'),
                 value: _formatFileSize(book.fileSize),
               ),
               _BookMetaRow(
-                label: '导入时间',
+                label: _text(zh: '导入时间', en: 'Imported'),
                 value: _formatDateTime(book.importedAt),
               ),
               _BookMetaRow(
-                label: '最近阅读',
+                label: _text(zh: '最近阅读', en: 'Last Read'),
                 value: book.lastReadAt == null
-                    ? '未开始'
+                    ? _text(zh: '未开始', en: 'Not started')
                     : _formatDateTime(book.lastReadAt!),
               ),
-              _BookMetaRow(label: '文件路径', value: book.epubPath, maxLines: 2),
+              _BookMetaRow(
+                label: _text(zh: '文件路径', en: 'Path'),
+                value: book.epubPath,
+                maxLines: 2,
+              ),
             ],
           ),
         ),
@@ -884,7 +914,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '阅读统计',
+                _text(zh: '阅读统计', en: 'Reading Stats'),
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -893,30 +923,36 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
               ),
               const SizedBox(height: 16),
               _BookStatRow(
-                label: '阅读进度',
+                label: _text(zh: '阅读进度', en: 'Progress'),
                 value: '${(((progress?.percentage ?? 0) * 100)).round()}%',
               ),
               _BookStatRow(
-                label: '阅读时长',
+                label: _text(zh: '阅读时长', en: 'Reading Time'),
                 value: _formatReadingDuration(
                   progress?.readingTimeSeconds ?? 0,
                 ),
               ),
               _BookStatRow(
-                label: '最近阅读',
+                label: _text(zh: '最近阅读', en: 'Last Read'),
                 value: progress == null
-                    ? '暂无记录'
+                    ? _text(zh: '暂无记录', en: 'No record')
                     : _formatDateTime(progress.lastReadAt),
               ),
               _BookStatRow(
-                label: '阅读位置',
+                label: _text(zh: '阅读位置', en: 'Position'),
                 value: progress?.location.trim().isNotEmpty == true
                     ? progress!.location
-                    : '暂无记录',
+                    : _text(zh: '暂无记录', en: 'No record'),
                 maxLines: 2,
               ),
-              _BookStatRow(label: '书签数量', value: '${bookmarks.length}'),
-              _BookStatRow(label: '笔记数量', value: '${notes.length}'),
+              _BookStatRow(
+                label: _text(zh: '书签数量', en: 'Bookmarks'),
+                value: '${bookmarks.length}',
+              ),
+              _BookStatRow(
+                label: _text(zh: '笔记数量', en: 'Notes'),
+                value: '${notes.length}',
+              ),
             ],
           ),
         ),
@@ -952,7 +988,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
       final sourceFile = File(pickedPath);
       if (!await sourceFile.exists()) {
-        throw Exception('图片文件不存在');
+        throw Exception(_text(zh: '图片文件不存在', en: 'Image file not found'));
       }
 
       final appDir = await getApplicationDocumentsDirectory();
@@ -982,12 +1018,18 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       if (!mounted) {
         return;
       }
-      _showTopNotice(message: '封面已更新', kind: _TopNoticeKind.success);
+      _showTopNotice(
+        message: _text(zh: '封面已更新', en: 'Cover updated'),
+        kind: _TopNoticeKind.success,
+      );
     } catch (e) {
       if (!mounted) {
         return;
       }
-      _showTopNotice(message: '修改封面失败: $e', kind: _TopNoticeKind.error);
+      _showTopNotice(
+        message: '${_text(zh: '修改封面失败', en: 'Failed to update cover')}: $e',
+        kind: _TopNoticeKind.error,
+      );
     }
   }
 
@@ -1031,7 +1073,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       await ref.read(booksProvider.notifier).deleteBook(bookId);
     } catch (e) {
       if (mounted) {
-        _showTopNotice(message: '删除书籍失败: $e', kind: _TopNoticeKind.error);
+        _showTopNotice(
+          message: '${_text(zh: '删除书籍失败', en: 'Failed to delete book')}: $e',
+          kind: _TopNoticeKind.error,
+        );
       }
     }
   }
@@ -1106,7 +1151,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       // Filter to only accept EPUB and TXT files
       if (fileExt != 'epub' && fileExt != 'txt') {
         if (!mounted) return;
-        _showTopNotice(message: '请选择 EPUB 或 TXT 文件', kind: _TopNoticeKind.info);
+        _showTopNotice(
+          message: _text(
+            zh: '请选择 EPUB 或 TXT 文件',
+            en: 'Please choose an EPUB or TXT file',
+          ),
+          kind: _TopNoticeKind.info,
+        );
         return;
       }
 
@@ -1114,7 +1165,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
       // Show loading
       if (!mounted) return;
-      _showLoadingDialog('Importing book...');
+      _showLoadingDialog(_text(zh: '正在导入书籍...', en: 'Importing book...'));
 
       // Copy file to app documents directory
       final appDir = await getApplicationDocumentsDirectory();
@@ -1123,7 +1174,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         await booksDir.create(recursive: true);
       }
 
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}.${fileExt}';
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
       final newPath = '${booksDir.path}/$fileName';
       final sourceFile = File(pickedFile.path!);
       await sourceFile.copy(newPath);
@@ -1192,13 +1243,18 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       Navigator.pop(context); // Dismiss loading dialog
 
       _showTopNotice(
-        message: '已导入《${book.title}》',
+        message: LocaleText.isChinese(context)
+            ? '已导入《${book.title}》'
+            : 'Imported "${book.title}"',
         kind: _TopNoticeKind.success,
       );
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog
-      _showTopNotice(message: '导入失败: $e', kind: _TopNoticeKind.error);
+      _showTopNotice(
+        message: '${_text(zh: '导入失败', en: 'Import failed')}: $e',
+        kind: _TopNoticeKind.error,
+      );
     }
   }
 
@@ -1345,14 +1401,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   String _categoryNameForBook(Book book, List<Category> categories) {
     final categoryId = book.categoryId;
     if (categoryId == null || categoryId.isEmpty) {
-      return '未分类';
+      return _text(zh: '未分类', en: 'Uncategorized');
     }
     for (final category in categories) {
       if (category.id == categoryId) {
         return category.name;
       }
     }
-    return '未分类';
+    return _text(zh: '未分类', en: 'Uncategorized');
   }
 
   String _formatDateTime(DateTime value) {
@@ -1377,17 +1433,23 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
   String _formatReadingDuration(int seconds) {
     if (seconds <= 0) {
-      return '0 分钟';
+      return _text(zh: '0 分钟', en: '0 min');
     }
     final hours = seconds ~/ 3600;
     final minutes = (seconds % 3600) ~/ 60;
     if (hours <= 0) {
-      return '$minutes 分钟';
+      return LocaleText.isChinese(context) ? '$minutes 分钟' : '$minutes min';
     }
     if (minutes == 0) {
-      return '$hours 小时';
+      return LocaleText.isChinese(context) ? '$hours 小时' : '$hours hr';
     }
-    return '$hours 小时 $minutes 分钟';
+    return LocaleText.isChinese(context)
+        ? '$hours 小时 $minutes 分钟'
+        : '$hours hr $minutes min';
+  }
+
+  String _text({required String zh, required String en}) {
+    return LocaleText.of(context, zh: zh, en: en);
   }
 
   void _showTopNotice({required String message, required _TopNoticeKind kind}) {
@@ -1571,7 +1633,11 @@ class _CurrentlyReadingCard extends StatelessWidget {
                         Text(
                           book.author?.trim().isNotEmpty == true
                               ? book.author!
-                              : '未知作者',
+                              : LocaleText.of(
+                                  context,
+                                  zh: '未知作者',
+                                  en: 'Unknown Author',
+                                ),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
@@ -1587,7 +1653,11 @@ class _CurrentlyReadingCard extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                '阅读进度',
+                                LocaleText.of(
+                                  context,
+                                  zh: '阅读进度',
+                                  en: 'Progress',
+                                ),
                                 style: TextStyle(
                                   fontSize: 11.5,
                                   color: theme.secondaryTextColor.withValues(
@@ -1633,7 +1703,11 @@ class _CurrentlyReadingCard extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                '正在阅读',
+                                LocaleText.of(
+                                  context,
+                                  zh: '正在阅读',
+                                  en: 'Reading',
+                                ),
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -1656,7 +1730,9 @@ class _CurrentlyReadingCard extends StatelessWidget {
                                 backgroundColor: theme.primaryColor,
                                 foregroundColor: Colors.white,
                               ),
-                              child: const Text('听书'),
+                              child: Text(
+                                LocaleText.of(context, zh: '听书', en: 'Listen'),
+                              ),
                             ),
                           ],
                         ),
@@ -1699,7 +1775,9 @@ class _SelectionBar extends StatelessWidget {
           child: Row(
             children: [
               Text(
-                '已选 $selectedCount 本',
+                LocaleText.isChinese(context)
+                    ? '已选 $selectedCount 本'
+                    : '$selectedCount selected',
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -1707,7 +1785,11 @@ class _SelectionBar extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                '可批量删除',
+                LocaleText.of(
+                  context,
+                  zh: '可批量删除',
+                  en: 'Bulk delete available',
+                ),
                 style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(
@@ -1718,10 +1800,13 @@ class _SelectionBar extends StatelessWidget {
               const SizedBox(width: 10),
               OutlinedButton(
                 onPressed: onMoveCategory,
-                child: const Text('分类'),
+                child: Text(LocaleText.of(context, zh: '分类', en: 'Category')),
               ),
               const SizedBox(width: 8),
-              FilledButton(onPressed: onDelete, child: const Text('删除')),
+              FilledButton(
+                onPressed: onDelete,
+                child: Text(LocaleText.of(context, zh: '删除', en: 'Delete')),
+              ),
             ],
           ),
         ),
@@ -1789,28 +1874,40 @@ class _BookContextMenuPopup extends StatelessWidget {
                   children: [
                     _BookContextMenuHeader(book: book, theme: theme),
                     const _BookContextMenuDivider(),
-                    const _BookContextMenuAction(
+                    _BookContextMenuAction(
                       action: _BookQuickAction.details,
                       icon: CupertinoIcons.info_circle,
-                      label: '书籍详情',
+                      label: LocaleText.of(
+                        context,
+                        zh: '书籍详情',
+                        en: 'Book Details',
+                      ),
                     ),
                     const _BookContextMenuDivider(),
-                    const _BookContextMenuAction(
+                    _BookContextMenuAction(
                       action: _BookQuickAction.changeCover,
                       icon: CupertinoIcons.photo,
-                      label: '修改封面',
+                      label: LocaleText.of(
+                        context,
+                        zh: '修改封面',
+                        en: 'Change Cover',
+                      ),
                     ),
                     const _BookContextMenuDivider(),
-                    const _BookContextMenuAction(
+                    _BookContextMenuAction(
                       action: _BookQuickAction.stats,
                       icon: CupertinoIcons.chart_bar,
-                      label: '阅读统计',
+                      label: LocaleText.of(
+                        context,
+                        zh: '阅读统计',
+                        en: 'Reading Stats',
+                      ),
                     ),
                     const _BookContextMenuDivider(),
-                    const _BookContextMenuAction(
+                    _BookContextMenuAction(
                       action: _BookQuickAction.delete,
                       icon: CupertinoIcons.delete,
-                      label: '删除',
+                      label: LocaleText.of(context, zh: '删除', en: 'Delete'),
                       isDestructive: true,
                     ),
                   ],
