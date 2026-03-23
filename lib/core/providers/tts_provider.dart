@@ -31,6 +31,8 @@ class TtsAppState {
   final bool isLoadingVoices;
   final bool isLoadingAudio;
   final List<TtsChapterPayload> chapterQueue;
+  final DateTime? sleepTimerEndsAt;
+  final Duration? sleepTimerRemaining;
 
   const TtsAppState({
     this.isSpeaking = false,
@@ -53,6 +55,8 @@ class TtsAppState {
     this.isLoadingVoices = false,
     this.isLoadingAudio = false,
     this.chapterQueue = const <TtsChapterPayload>[],
+    this.sleepTimerEndsAt,
+    this.sleepTimerRemaining,
   });
 
   TtsAppState copyWith({
@@ -84,6 +88,10 @@ class TtsAppState {
     bool? isLoadingAudio,
     List<TtsChapterPayload>? chapterQueue,
     bool clearChapterQueue = false,
+    DateTime? sleepTimerEndsAt,
+    bool clearSleepTimerEndsAt = false,
+    Duration? sleepTimerRemaining,
+    bool clearSleepTimerRemaining = false,
   }) {
     return TtsAppState(
       isSpeaking: isSpeaking ?? this.isSpeaking,
@@ -120,6 +128,12 @@ class TtsAppState {
       chapterQueue: clearChapterQueue
           ? const <TtsChapterPayload>[]
           : (chapterQueue ?? this.chapterQueue),
+      sleepTimerEndsAt: clearSleepTimerEndsAt
+          ? null
+          : (sleepTimerEndsAt ?? this.sleepTimerEndsAt),
+      sleepTimerRemaining: clearSleepTimerRemaining
+          ? null
+          : (sleepTimerRemaining ?? this.sleepTimerRemaining),
     );
   }
 }
@@ -134,6 +148,8 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   bool _autoAdvanceInProgress = false;
   bool _uiHandlesChapterAdvance = false;
   bool _serviceHandlesChapterQueue = false;
+  Timer? _sleepTimer;
+  Timer? _sleepTimerTicker;
 
   TtsNotifier() : _ttsService = TtsService(), super(const TtsAppState()) {
     _ttsService.setStateCallback((ttsState) {
@@ -399,6 +415,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   Future<void> stop() async {
     try {
       _trace('stop');
+      clearSleepTimer();
       _suppressAutoAdvanceOnce = true;
       _serviceHandlesChapterQueue = false;
       await _ttsService.stop();
@@ -496,6 +513,58 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     _trace('preloadUpcomingText: textLength=${trimmed.length}');
     await _ttsService.setVoice(state.selectedVoice);
     await _ttsService.preloadUpcomingText(trimmed);
+  }
+
+  void _updateSleepTimerState() {
+    final endsAt = state.sleepTimerEndsAt;
+    if (endsAt == null) {
+      return;
+    }
+    final remaining = endsAt.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      clearSleepTimer();
+      unawaited(stop());
+      return;
+    }
+    state = state.copyWith(
+      sleepTimerRemaining: Duration(seconds: remaining.inSeconds),
+    );
+  }
+
+  void _startSleepTimerTicker() {
+    _sleepTimerTicker?.cancel();
+    _sleepTimerTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      _updateSleepTimerState();
+    });
+  }
+
+  void setSleepTimer(Duration duration) {
+    final safeDuration = Duration(
+      seconds: duration.inSeconds.clamp(1, 24 * 3600).toInt(),
+    );
+    final endsAt = DateTime.now().add(safeDuration);
+    _sleepTimer?.cancel();
+    _sleepTimerTicker?.cancel();
+    _sleepTimer = Timer(safeDuration, () async {
+      clearSleepTimer();
+      await stop();
+    });
+    state = state.copyWith(
+      sleepTimerEndsAt: endsAt,
+      sleepTimerRemaining: safeDuration,
+    );
+    _startSleepTimerTicker();
+  }
+
+  void clearSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimerTicker?.cancel();
+    _sleepTimer = null;
+    _sleepTimerTicker = null;
+    state = state.copyWith(
+      clearSleepTimerEndsAt: true,
+      clearSleepTimerRemaining: true,
+    );
   }
 
   Future<void> loadVoices({String? locale}) async {
@@ -735,6 +804,8 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
   @override
   void dispose() {
+    _sleepTimer?.cancel();
+    _sleepTimerTicker?.cancel();
     _ttsService.dispose();
     super.dispose();
   }

@@ -20,7 +20,7 @@ import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
-import 'package:myreader/presentation/pages/reader/audiobook_page.dart';
+import 'package:myreader/presentation/pages/reader/audiobook_page_redesign.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -3605,7 +3605,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         final screenHeight = MediaQuery.sizeOf(context).height;
         return SizedBox(
           height: screenHeight,
-          child: AudiobookPage(
+          child: AudiobookPageRedesign(
             book: book,
             initialText: launchData.initialText,
             initialPage: _currentPage,
@@ -3620,6 +3620,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             nextChapterIndex: launchData.nextChapterIndex,
             chapterQueue: launchData.chapterQueue,
             bgColor: _readerBgColor,
+            textColor: _textColor,
           ),
         );
       },

@@ -114,10 +114,13 @@ class ThemeConstants {
   /// 适用场景：硬核知识、科技资讯或悬疑小说
   static const AppThemeData blueProfessionalTheme = AppThemeData(
     primaryColor: blueProfessionalPrimary,
+    primaryDarkColor: Color(0xFF6F8795),
     readingBackgroundColor: blueProfessionalReadingBg,
+    audiobookBgTop: Color(0xFFE5EDF1),
     scaffoldBackgroundColor: blueProfessionalScaffoldBg,
     textColor: blueProfessionalText,
     secondaryTextColor: blueProfessionalSecondaryText,
+    progressTrackColor: Color(0xFFD9E2E7),
     accentColor: blueProfessionalAccent,
     cardBackgroundColor: blueProfessionalCardBg,
     dividerColor: blueProfessionalDivider,
