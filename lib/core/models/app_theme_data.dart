@@ -179,10 +179,13 @@ class AppThemeData {
   /// 复制主题并修改部分颜色
   AppThemeData copyWith({
     Color? primaryColor,
+    Color? primaryDarkColor,
     Color? readingBackgroundColor,
+    Color? audiobookBgTop,
     Color? scaffoldBackgroundColor,
     Color? textColor,
     Color? secondaryTextColor,
+    Color? progressTrackColor,
     Color? accentColor,
     Color? cardBackgroundColor,
     Color? dividerColor,
@@ -192,12 +195,15 @@ class AppThemeData {
   }) {
     return AppThemeData(
       primaryColor: primaryColor ?? this.primaryColor,
+      primaryDarkColor: primaryDarkColor ?? this.primaryDarkColor,
       readingBackgroundColor:
           readingBackgroundColor ?? this.readingBackgroundColor,
+      audiobookBgTop: audiobookBgTop ?? this.audiobookBgTop,
       scaffoldBackgroundColor:
           scaffoldBackgroundColor ?? this.scaffoldBackgroundColor,
       textColor: textColor ?? this.textColor,
       secondaryTextColor: secondaryTextColor ?? this.secondaryTextColor,
+      progressTrackColor: progressTrackColor ?? this.progressTrackColor,
       accentColor: accentColor ?? this.accentColor,
       cardBackgroundColor: cardBackgroundColor ?? this.cardBackgroundColor,
       dividerColor: dividerColor ?? this.dividerColor,
