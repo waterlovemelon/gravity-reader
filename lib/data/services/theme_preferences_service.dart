@@ -5,12 +5,15 @@ import 'package:myreader/core/constants/theme_constants.dart';
 /// 负责保存和加载用户选择的主题偏好
 class ThemePreferencesService {
   static const String _keySelectedThemeId = 'selected_theme_id';
+  static const String _keyAppThemeMode = 'app_theme_mode';
+  final SharedPreferences _prefs;
+
+  ThemePreferencesService(this._prefs);
 
   /// 保存用户选择的主题ID
   Future<bool> saveSelectedThemeId(String themeId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return await prefs.setString(_keySelectedThemeId, themeId);
+      return await _prefs.setString(_keySelectedThemeId, themeId);
     } catch (e) {
       print('Error saving theme preference: $e');
       return false;
@@ -21,8 +24,7 @@ class ThemePreferencesService {
   /// 如果没有保存过，返回默认主题ID
   Future<String> loadSelectedThemeId() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final themeId = prefs.getString(_keySelectedThemeId);
+      final themeId = _prefs.getString(_keySelectedThemeId);
 
       // 如果没有保存过，返回默认主题ID
       return themeId ?? ThemeConstants.themeIdGreenFresh;
@@ -33,11 +35,30 @@ class ThemePreferencesService {
     }
   }
 
+  Future<bool> saveThemeMode(String themeMode) async {
+    try {
+      return await _prefs.setString(_keyAppThemeMode, themeMode);
+    } catch (e) {
+      print('Error saving theme mode: $e');
+      return false;
+    }
+  }
+
+  Future<String?> loadThemeMode() async {
+    try {
+      return _prefs.getString(_keyAppThemeMode);
+    } catch (e) {
+      print('Error loading theme mode: $e');
+      return null;
+    }
+  }
+
   /// 清除主题偏好
   Future<bool> clearThemePreference() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return await prefs.remove(_keySelectedThemeId);
+      final selectedThemeRemoved = await _prefs.remove(_keySelectedThemeId);
+      final themeModeRemoved = await _prefs.remove(_keyAppThemeMode);
+      return selectedThemeRemoved && themeModeRemoved;
     } catch (e) {
       print('Error clearing theme preference: $e');
       return false;

@@ -365,6 +365,8 @@ class ProfileTab extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 10),
+            _ThemeModeSection(theme: theme),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
@@ -518,6 +520,132 @@ class _ProfileCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
       ),
       child: child,
+    );
+  }
+}
+
+class _ThemeModeSection extends ConsumerWidget {
+  final AppThemeData theme;
+
+  const _ThemeModeSection({required this.theme});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentMode = ref.watch(appThemeModeProvider);
+
+    return _ProfileCard(
+      theme: theme,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.palette_outlined, color: theme.primaryColor),
+              const SizedBox(width: 8),
+              Text(
+                LocaleText.of(context, zh: '主题设置', en: 'Theme'),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            LocaleText.of(
+              context,
+              zh: '选择应用外观模式',
+              en: 'Choose the app appearance mode',
+            ),
+            style: TextStyle(fontSize: 13, color: theme.secondaryTextColor),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _ThemeModeChip(
+                theme: theme,
+                label: LocaleText.of(context, zh: '跟随系统', en: 'System'),
+                selected: currentMode == AppThemeMode.system,
+                onTap: () {
+                  ref
+                      .read(themeProvider.notifier)
+                      .switchThemeMode(AppThemeMode.system);
+                },
+              ),
+              _ThemeModeChip(
+                theme: theme,
+                label: LocaleText.of(context, zh: '浅色', en: 'Light'),
+                selected: currentMode == AppThemeMode.light,
+                onTap: () {
+                  ref
+                      .read(themeProvider.notifier)
+                      .switchThemeMode(AppThemeMode.light);
+                },
+              ),
+              _ThemeModeChip(
+                theme: theme,
+                label: LocaleText.of(context, zh: '深色', en: 'Dark'),
+                selected: currentMode == AppThemeMode.dark,
+                onTap: () {
+                  ref
+                      .read(themeProvider.notifier)
+                      .switchThemeMode(AppThemeMode.dark);
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeModeChip extends StatelessWidget {
+  final AppThemeData theme;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ThemeModeChip({
+    required this.theme,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.primaryColor.withValues(alpha: 0.14)
+                : theme.scaffoldBackgroundColor,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected ? theme.primaryColor : theme.dividerColor,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? theme.primaryColor : theme.textColor,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

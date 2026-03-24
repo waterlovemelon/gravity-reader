@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/constants/app_constants.dart';
 import 'package:myreader/core/models/tts_chapter_payload.dart';
+import 'package:myreader/core/providers/shared_preferences_provider.dart';
 import 'package:myreader/data/services/tts_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -140,6 +141,7 @@ class TtsAppState {
 
 class TtsNotifier extends StateNotifier<TtsAppState> {
   final TtsService _ttsService;
+  final SharedPreferences _prefs;
   final Map<String, List<TtsVoice>> _localeVoicesCache =
       <String, List<TtsVoice>>{};
   final Map<String, String> _bookVoiceAssignments = <String, String>{};
@@ -151,7 +153,9 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   Timer? _sleepTimer;
   Timer? _sleepTimerTicker;
 
-  TtsNotifier() : _ttsService = TtsService(), super(const TtsAppState()) {
+  TtsNotifier(this._prefs)
+    : _ttsService = TtsService(),
+      super(const TtsAppState()) {
     _ttsService.setStateCallback((ttsState) {
       _trace(
         'service state callback: ttsState=$ttsState, '
@@ -308,8 +312,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
   }
 
   Future<void> _initializeInternal() async {
-    final prefs = await SharedPreferences.getInstance();
-    final persistedVoice = prefs.getString(AppConstants.keyTtsSelectedVoice);
+    final persistedVoice = _prefs.getString(AppConstants.keyTtsSelectedVoice);
     final initialVoice =
         (persistedVoice == null || persistedVoice.trim().isEmpty)
         ? AppConstants.ttsVoice
@@ -317,7 +320,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 
     await _ttsService.setVoice(initialVoice);
     state = state.copyWith(selectedVoice: initialVoice);
-    _loadPersistedBookVoiceMap(prefs);
+    _loadPersistedBookVoiceMap(_prefs);
     _log(
       'initialized: selectedVoice=$initialVoice, '
       'bookVoiceMapCount=${_bookVoiceAssignments.length}',
@@ -603,9 +606,8 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     if (bookId != null && bookId.trim().isNotEmpty) {
       _bookVoiceAssignments[bookId] = trimmed;
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keyTtsSelectedVoice, trimmed);
-    await _saveBookVoiceMap(prefs);
+    await _prefs.setString(AppConstants.keyTtsSelectedVoice, trimmed);
+    await _saveBookVoiceMap(_prefs);
     state = state.copyWith(selectedVoice: trimmed);
   }
 
@@ -614,7 +616,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
     final locales = books
         .map((book) => inferLocaleForBook(book))
         .toSet()
-        .toList(growable: false);
+        .toList();
     if (locales.isEmpty) {
       locales.add('zh-CN');
     }
@@ -623,8 +625,7 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
       await _getVoicesForLocale(locale);
     }
     _assignVoicesForBooks(books);
-    final prefs = await SharedPreferences.getInstance();
-    await _saveBookVoiceMap(prefs);
+    await _saveBookVoiceMap(_prefs);
   }
 
   Future<void> selectVoiceForBook(Book book, {String? sampleText}) async {
@@ -812,5 +813,6 @@ class TtsNotifier extends StateNotifier<TtsAppState> {
 }
 
 final ttsProvider = StateNotifierProvider<TtsNotifier, TtsAppState>((ref) {
-  return TtsNotifier();
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return TtsNotifier(prefs);
 });
