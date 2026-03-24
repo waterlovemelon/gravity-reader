@@ -63,80 +63,127 @@ class AppThemeData {
   });
 
   /// 转换为Flutter ThemeData
-  ThemeData toThemeData() {
+  ThemeData toThemeData({Brightness brightness = Brightness.light}) {
+    final resolvedTheme = resolveBrightness(brightness);
+
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.light(
-        primary: primaryColor,
-        secondary: accentColor,
-        surface: cardBackgroundColor,
-        background: scaffoldBackgroundColor,
-        onPrimary: Colors.white, // 主色按钮搭配白色文字
-        onSecondary: textColor,
-        onSurface: textColor,
-        onBackground: textColor,
-      ),
-      scaffoldBackgroundColor: scaffoldBackgroundColor,
-      cardColor: cardBackgroundColor,
+      brightness: brightness,
+      colorScheme:
+          ColorScheme.fromSeed(
+            seedColor: resolvedTheme.primaryColor,
+            brightness: brightness,
+          ).copyWith(
+            primary: resolvedTheme.primaryColor,
+            secondary: resolvedTheme.accentColor,
+            surface: resolvedTheme.cardBackgroundColor,
+            onPrimary: Colors.white,
+            onSecondary: resolvedTheme.textColor,
+            onSurface: resolvedTheme.textColor,
+          ),
+      scaffoldBackgroundColor: resolvedTheme.scaffoldBackgroundColor,
+      cardColor: resolvedTheme.cardBackgroundColor,
       textTheme: TextTheme(
-        bodyLarge: TextStyle(color: textColor, fontSize: 16, height: 1.5),
-        bodyMedium: TextStyle(color: textColor, fontSize: 14, height: 1.5),
+        bodyLarge: TextStyle(
+          color: resolvedTheme.textColor,
+          fontSize: 16,
+          height: 1.5,
+        ),
+        bodyMedium: TextStyle(
+          color: resolvedTheme.textColor,
+          fontSize: 14,
+          height: 1.5,
+        ),
         bodySmall: TextStyle(
-          color: secondaryTextColor,
+          color: resolvedTheme.secondaryTextColor,
           fontSize: 12,
           height: 1.5,
         ),
         titleLarge: TextStyle(
-          color: textColor,
+          color: resolvedTheme.textColor,
           fontSize: 20,
           fontWeight: FontWeight.w600,
         ),
         titleMedium: TextStyle(
-          color: textColor,
+          color: resolvedTheme.textColor,
           fontSize: 18,
           fontWeight: FontWeight.w500,
         ),
-        labelSmall: TextStyle(color: secondaryTextColor, fontSize: 12),
+        labelSmall: TextStyle(
+          color: resolvedTheme.secondaryTextColor,
+          fontSize: 12,
+        ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: scaffoldBackgroundColor,
-        foregroundColor: textColor,
+        backgroundColor: resolvedTheme.scaffoldBackgroundColor,
+        foregroundColor: resolvedTheme.textColor,
         elevation: 0,
         centerTitle: true,
       ),
       cardTheme: CardThemeData(
-        color: cardBackgroundColor,
+        color: resolvedTheme.cardBackgroundColor,
         elevation: 2,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(borderRadius),
+          borderRadius: BorderRadius.circular(resolvedTheme.borderRadius),
         ),
       ),
-      dividerTheme: DividerThemeData(color: dividerColor, thickness: 1),
+      dividerTheme: DividerThemeData(
+        color: resolvedTheme.dividerColor,
+        thickness: 1,
+      ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primaryColor,
+          backgroundColor: resolvedTheme.primaryColor,
           foregroundColor: Colors.white, // 主色按钮搭配白色文字
           elevation: 2,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(borderRadius),
+            borderRadius: BorderRadius.circular(resolvedTheme.borderRadius),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: primaryColor,
+        backgroundColor: resolvedTheme.primaryColor,
         foregroundColor: Colors.white,
         elevation: 4,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(borderRadius),
+          borderRadius: BorderRadius.circular(resolvedTheme.borderRadius),
         ),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: cardBackgroundColor,
-        selectedItemColor: primaryColor,
-        unselectedItemColor: secondaryTextColor,
+        backgroundColor: resolvedTheme.cardBackgroundColor,
+        selectedItemColor: resolvedTheme.primaryColor,
+        unselectedItemColor: resolvedTheme.secondaryTextColor,
         type: BottomNavigationBarType.fixed,
       ),
+    );
+  }
+
+  AppThemeData resolveBrightness(Brightness brightness) {
+    if (brightness == Brightness.light) {
+      return this;
+    }
+
+    return copyWith(
+      primaryColor: _shiftLightness(primaryColor, 0.64),
+      primaryDarkColor: _shiftLightness(primaryDarkColor, 0.52),
+      readingBackgroundColor: Color.lerp(
+        readingBackgroundColor,
+        Colors.black,
+        0.86,
+      )!,
+      audiobookBgTop: Color.lerp(audiobookBgTop, Colors.black, 0.82)!,
+      scaffoldBackgroundColor: Color.lerp(
+        scaffoldBackgroundColor,
+        Colors.black,
+        0.84,
+      )!,
+      textColor: Color.lerp(Colors.white, textColor, 0.12)!,
+      secondaryTextColor: Color.lerp(Colors.white, secondaryTextColor, 0.34)!,
+      progressTrackColor: Color.lerp(progressTrackColor, Colors.black, 0.68)!,
+      accentColor: _shiftLightness(accentColor, 0.72),
+      cardBackgroundColor: Color.lerp(cardBackgroundColor, Colors.black, 0.78)!,
+      dividerColor: Color.lerp(dividerColor, Colors.white, 0.14)!,
     );
   }
 
@@ -148,11 +195,9 @@ class AppThemeData {
         primary: primaryColor,
         secondary: accentColor,
         surface: readingBackgroundColor,
-        background: readingBackgroundColor,
         onPrimary: Colors.white,
         onSecondary: textColor,
         onSurface: textColor,
-        onBackground: textColor,
       ),
       scaffoldBackgroundColor: readingBackgroundColor,
       textTheme: TextTheme(
@@ -211,5 +256,10 @@ class AppThemeData {
       name: name ?? this.name,
       id: id ?? this.id,
     );
+  }
+
+  static Color _shiftLightness(Color color, double targetLightness) {
+    final hsl = HSLColor.fromColor(color);
+    return hsl.withLightness(targetLightness.clamp(0.0, 1.0)).toColor();
   }
 }
