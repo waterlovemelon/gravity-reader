@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gravity Reader 设置面板原型</title>
+    <style>
+      :root {
+        --app-bg: #e9e3d8;
+        --surface: rgba(255, 255, 255, 0.76);
+        --surface-strong: #f7f2e8;
+        --surface-soft: rgba(255, 255, 255, 0.56);
+        --text: #2f261d;
+        --text-muted: rgba(47, 38, 29, 0.62);
+        --line: rgba(47, 38, 29, 0.08);
+        --accent: #3b82f6;
+        --accent-soft: rgba(59, 130, 246, 0.12);
+        --shadow: 0 18px 36px rgba(49, 37, 24, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 28%),
+          linear-gradient(180deg, #f6f1e8 0%, #ebe4d8 48%, #e0d7cb 100%);
+        display: flex;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      body.dark {
+        --app-bg: #16181d;
+        --surface: rgba(28, 31, 38, 0.82);
+        --surface-strong: #1e2229;
+        --surface-soft: rgba(255, 255, 255, 0.04);
+        --text: #ece8dd;
+        --text-muted: rgba(236, 232, 221, 0.6);
+        --line: rgba(255, 255, 255, 0.08);
+        --shadow: 0 18px 36px rgba(0, 0, 0, 0.36);
+        background:
+          radial-gradient(circle at top left, rgba(58, 72, 95, 0.34), transparent 24%),
+          linear-gradient(180deg, #0f1216 0%, #171a20 48%, #1f232b 100%);
+      }
+
+      .workspace {
+        width: min(1120px, 100%);
+        display: grid;
+        grid-template-columns: 420px minmax(320px, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+
+      .phone {
+        position: sticky;
+        top: 24px;
+        background: rgba(17, 17, 17, 0.92);
+        border-radius: 36px;
+        padding: 14px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+      }
+
+      .screen {
+        position: relative;
+        overflow: hidden;
+        min-height: 840px;
+        border-radius: 26px;
+        background: var(--app-bg);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .reader {
+        padding: 34px 24px 220px;
+      }
+
+      .chapter {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 20px;
+      }
+
+      .text p {
+        margin: 0 0 16px;
+        line-height: 1.95;
+        font-size: 20px;
+        color: var(--text);
+      }
+
+      .toolbar {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 18px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        padding: 14px;
+        border-radius: 24px;
+        background: var(--surface);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow);
+      }
+
+      .tool-btn {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        padding: 10px 8px;
+        border-radius: 18px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+
+      .tool-btn.active {
+        background: var(--surface-soft);
+      }
+
+      .tool-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        background: var(--surface-soft);
+        font-size: 20px;
+      }
+
+      .tool-btn span {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .sheet {
+        position: absolute;
+        inset: auto 0 0;
+        padding: 12px 12px 0;
+        transform: translateY(62%);
+        transition: transform 220ms ease;
+      }
+
+      .screen.show-sheet .sheet {
+        transform: translateY(0);
+      }
+
+      .sheet-card {
+        padding: 12px 14px 20px;
+        border-radius: 28px 28px 0 0;
+        background: var(--surface);
+        backdrop-filter: blur(20px);
+        box-shadow: var(--shadow);
+      }
+
+      .grabber {
+        width: 38px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--text-muted);
+        opacity: 0.35;
+        margin: 0 auto 14px;
+      }
+
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+
+      .sheet-head h2 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .sheet-close {
+        appearance: none;
+        border: 0;
+        background: var(--surface-soft);
+        color: var(--text);
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+
+      .section {
+        margin-top: 10px;
+        padding: 14px;
+        border-radius: 18px;
+        background: var(--surface-strong);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .section-title strong {
+        font-size: 15px;
+      }
+
+      .badge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .dual-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .palette-section {
+        display: grid;
+        gap: 10px;
+      }
+
+      .palette-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .palette-caption {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .palette-list {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 58px;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 2px 2px 8px;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+      }
+
+      .palette-list::-webkit-scrollbar {
+        display: none;
+      }
+
+      .swatch {
+        position: relative;
+        appearance: none;
+        border: 1px solid transparent;
+        width: 58px;
+        height: 52px;
+        border-radius: 18px;
+        cursor: pointer;
+        padding: 0;
+        scroll-snap-align: start;
+        transition: transform 140ms ease, box-shadow 140ms ease;
+      }
+
+      .swatch:hover {
+        transform: translateY(-1px);
+      }
+
+      .swatch.selected {
+        border-color: rgba(59, 130, 246, 0.55);
+        box-shadow:
+          0 0 0 2px rgba(59, 130, 246, 0.12),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+      }
+
+      .swatch.dark-swatch.selected {
+        box-shadow:
+          0 0 0 2px rgba(59, 130, 246, 0.18),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+
+      .swatch::after {
+        content: "";
+        position: absolute;
+        inset: auto 18px 8px;
+        height: 4px;
+        border-radius: 999px;
+        border: 0;
+        opacity: 0;
+      }
+
+      .swatch.selected::after {
+        opacity: 1;
+        background: rgba(59, 130, 246, 0.95);
+      }
+
+      .swatch.dark-swatch.selected::after {
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .slider-block {
+        display: grid;
+        grid-template-columns: 32px 1fr 32px;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .slider-mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        background: var(--surface-soft);
+        display: grid;
+        place-items: center;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      .slider-shell {
+        position: relative;
+        height: 32px;
+        display: flex;
+        align-items: center;
+      }
+
+      .slider-ticks {
+        pointer-events: none;
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .slider-ticks span {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(59, 130, 246, 0.25);
+      }
+
+      .segmented {
+        display: flex;
+        gap: 8px;
+      }
+
+      .segmented button {
+        flex: 1;
+        appearance: none;
+        border: 0;
+        padding: 11px 10px;
+        border-radius: 14px;
+        background: var(--surface-soft);
+        color: var(--text-muted);
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .segmented button.selected {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .setting-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .setting-row:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .setting-row:first-child {
+        padding-top: 0;
+      }
+
+      .setting-meta strong {
+        display: block;
+        font-size: 15px;
+        margin-bottom: 4px;
+      }
+
+      .setting-meta span {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .setting-value {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 12px;
+        border-radius: 12px;
+        background: var(--surface-soft);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .setting-value.subtle {
+        color: var(--text-muted);
+        font-weight: 600;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .action-btn {
+        appearance: none;
+        border: 0;
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .action-btn.secondary {
+        background: var(--surface-soft);
+        color: var(--text);
+      }
+
+      .action-btn.primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .notes {
+        padding: 28px;
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.68);
+        backdrop-filter: blur(16px);
+        box-shadow: var(--shadow);
+      }
+
+      body.dark .notes {
+        background: rgba(24, 27, 34, 0.82);
+      }
+
+      .notes h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      .notes p {
+        margin: 0 0 18px;
+        font-size: 14px;
+        line-height: 1.75;
+        color: var(--text-muted);
+      }
+
+      .confirm-list {
+        display: grid;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .confirm-item {
+        padding: 16px 18px;
+        border-radius: 18px;
+        background: var(--surface-soft);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+
+      .confirm-item strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 15px;
+      }
+
+      .confirm-item span {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+
+      .flow {
+        display: grid;
+        gap: 10px;
+      }
+
+      .flow-step {
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: var(--surface-soft);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .kbd {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--surface-soft);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      @media (max-width: 960px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .phone {
+          position: relative;
+          top: 0;
+          max-width: 420px;
+          margin: 0 auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="workspace">
+      <section class="phone">
+        <div class="screen show-sheet" id="screen">
+          <div class="reader">
+            <div class="chapter">第一章 晚风与台灯</div>
+            <div class="text">
+              <p>
+                阅读页保留当前米色纸张感、圆角卡片和蓝色强调色，不改整体风格，只调整交互结构。
+              </p>
+              <p>
+                亮度按钮不再弹出单独面板，而是变成亮色和暗色的即时切换。用户需要更多细节设置时，再通过“设置”进入统一面板。
+              </p>
+              <p>
+                “字体设置”升级为“设置”，内部统一承载字体大小、行距、首行、自定义图片背景等所有阅读配置。
+              </p>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <button class="tool-btn" type="button">
+              <div class="tool-icon">≡</div>
+              <span>目录</span>
+            </button>
+            <button class="tool-btn active" id="themeToggle" type="button">
+              <div class="tool-icon" id="themeIcon">☀</div>
+              <span id="themeLabel">亮度</span>
+            </button>
+            <button class="tool-btn active" id="settingsToggle" type="button">
+              <div class="tool-icon">Aa</div>
+              <span>设置</span>
+            </button>
+            <button class="tool-btn" type="button">
+              <div class="tool-icon">♪</div>
+              <span>听书</span>
+            </button>
+          </div>
+
+          <div class="sheet">
+            <div class="sheet-card">
+              <div class="grabber"></div>
+              <div class="sheet-head">
+                <h2>设置</h2>
+                <button class="sheet-close" id="closeSheet" type="button">×</button>
+              </div>
+
+              <div class="section">
+                <div class="section-title">
+                  <strong>背景</strong>
+                  <span class="badge" id="modeBadge">米色</span>
+                </div>
+                <div class="palette-section">
+                  <div class="palette-head">
+                    <div class="palette-caption">从左到右由亮到暗，横向滑动可切更多颜色</div>
+                  </div>
+                  <div class="palette-list" id="paletteRail">
+                    <button class="swatch" data-theme-name="浅灰" data-theme-color="#F3F3F3" data-theme-mode="light" style="background:#F3F3F3" type="button"></button>
+                    <button class="swatch selected" data-theme-name="米色" data-theme-color="#E8E2D6" data-theme-mode="light" style="background:#E8E2D6" type="button"></button>
+                    <button class="swatch" data-theme-name="羊皮纸" data-theme-color="#F5ECD7" data-theme-mode="light" style="background:#F5ECD7" type="button"></button>
+                    <button class="swatch" data-theme-name="奶油黄" data-theme-color="#FFF8E7" data-theme-mode="light" style="background:#FFF8E7" type="button"></button>
+                    <button class="swatch" data-theme-name="雾蓝" data-theme-color="#E3EBF2" data-theme-mode="light" style="background:#E3EBF2" type="button"></button>
+                    <button class="swatch" data-theme-name="薄荷绿" data-theme-color="#F1F4EE" data-theme-mode="light" style="background:#F1F4EE" type="button"></button>
+                    <button class="swatch" data-theme-name="浅绿" data-theme-color="#A6C39D" data-theme-mode="light" style="background:#A6C39D" type="button"></button>
+                    <button class="swatch dark-swatch" data-theme-name="墨绿" data-theme-color="#1B2421" data-theme-mode="dark" style="background:#1B2421" type="button"></button>
+                    <button class="swatch dark-swatch" data-theme-name="夜蓝" data-theme-color="#18202A" data-theme-mode="dark" style="background:#18202A" type="button"></button>
+                    <button class="swatch dark-swatch selected" data-theme-name="深靛" data-theme-color="#1A1B26" data-theme-mode="dark" style="background:#1A1B26" type="button"></button>
+                    <button class="swatch dark-swatch" data-theme-name="深咖" data-theme-color="#1C1C1C" data-theme-mode="dark" style="background:#1C1C1C" type="button"></button>
+                    <button class="swatch dark-swatch" data-theme-name="深灰" data-theme-color="#121212" data-theme-mode="dark" style="background:#121212" type="button"></button>
+                    <button class="swatch dark-swatch" data-theme-name="炭黑" data-theme-color="#101113" data-theme-mode="dark" style="background:#101113" type="button"></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-title">
+                  <strong>字体大小</strong>
+                  <span class="badge" id="fontBadge">20</span>
+                </div>
+                <div class="slider-block">
+                  <div class="slider-mark">A</div>
+                  <div class="slider-shell">
+                    <div class="slider-ticks">
+                      <span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <input id="fontSlider" type="range" min="16" max="40" step="6" value="20" />
+                  </div>
+                  <div class="slider-mark" style="font-size: 24px">A</div>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="setting-row">
+                  <div class="setting-meta">
+                    <strong>字体样式</strong>
+                    <span>沿用现有二级选择面板</span>
+                  </div>
+                  <div class="setting-value">默认 ›</div>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-meta">
+                    <strong>首行设置</strong>
+                    <span>保留缩进 / 顶格切换</span>
+                  </div>
+                  <div class="setting-value">缩进 ›</div>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-meta">
+                    <strong>版式微调</strong>
+                    <span>边距、行距等低频设置</span>
+                  </div>
+                  <div class="setting-value subtle">边距中 / 行距适中 ›</div>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-meta">
+                    <strong>自定义图片背景</strong>
+                    <span>入口并入统一设置，不再分散</span>
+                  </div>
+                  <div class="setting-value">已设置 ›</div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button class="action-btn secondary" type="button">恢复默认</button>
+                <button class="action-btn primary" type="button">完成</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="notes">
+        <h1>阅读页设置整合原型</h1>
+        <p>
+          这个原型只做结构确认，不改风格。保留当前阅读页的米色纸感、深色夜间模式、蓝色数值标签、圆角卡片和底部工具栏语言。
+        </p>
+
+        <div class="confirm-list">
+          <div class="confirm-item">
+            <strong>1. 亮度按钮的定义</strong>
+            <span>
+              点击底部“亮度”后，立即在当前已选的亮色主题和当前已选的深色主题之间切换，不再弹窗，也不再保留亮度百分比和滑杆。
+            </span>
+          </div>
+          <div class="confirm-item">
+            <strong>2. 字体设置改名为设置</strong>
+            <span>
+              原“字体设置”入口改成“设置”，统一承载字体大小、边距、行距、字体样式、首行设置、自定义图片背景等全部阅读配置。
+            </span>
+          </div>
+          <div class="confirm-item">
+            <strong>3. 推荐布局</strong>
+            <span>
+              设置首屏只强调背景和字体大小。背景主题改成单行横向滚动色带，颜色从左到右由亮到暗，更接近手表配色选择的节奏；边距、行距降级进“版式微调”二级入口。
+            </span>
+          </div>
+        </div>
+
+        <div class="flow">
+          <div class="flow-step">
+            <span class="kbd">亮度</span>
+            用户点击一次，直接在“当前亮色主题”和“当前深色主题”之间切换。再次点击，切回另一态。
+          </div>
+          <div class="flow-step">
+            <span class="kbd">设置</span>
+            用户上拉统一设置面板，在同一处完成字体、版式、背景图片等配置。
+          </div>
+          <div class="flow-step">
+            <span class="kbd">设置内背景</span>
+            在统一设置里用一条横向色带承载所有背景色。用户可以直接横滑和点选，系统分别记住一个亮色主题和一个深色主题，底部快捷按钮在两者之间切换。
+          </div>
+        </div>
+
+        <p style="margin-top: 24px">
+          如果这个结构方向没问题，我下一步就直接按这个交互去改 Flutter：去掉亮度弹窗入口，把原字体面板升级成统一“设置”面板，并把图片背景入口并进去。
+        </p>
+      </aside>
+    </div>
+
+    <script>
+      const body = document.body;
+      const screen = document.getElementById("screen");
+      const themeToggle = document.getElementById("themeToggle");
+      const settingsToggle = document.getElementById("settingsToggle");
+      const closeSheet = document.getElementById("closeSheet");
+      const themeLabel = document.getElementById("themeLabel");
+      const themeIcon = document.getElementById("themeIcon");
+      const modeBadge = document.getElementById("modeBadge");
+      const fontSlider = document.getElementById("fontSlider");
+      const fontBadge = document.getElementById("fontBadge");
+      const paletteRail = document.getElementById("paletteRail");
+      const swatches = Array.from(document.querySelectorAll(".swatch"));
+      const marginSlider = document.getElementById("marginSlider");
+      const lineHeightSlider = document.getElementById("lineHeightSlider");
+      const marginBadge = document.getElementById("marginBadge");
+      const lineHeightBadge = document.getElementById("lineHeightBadge");
+      const marginLabels = ["小", "中", "大"];
+      const lineHeightLabels = ["紧", "适中", "松"];
+      let audioContext;
+      let lastTickAt = 0;
+      let lightSelection = swatches.find(
+        (swatch) => swatch.dataset.themeMode === "light" && swatch.classList.contains("selected"),
+      );
+      let darkSelection = swatches.find(
+        (swatch) => swatch.dataset.themeMode === "dark" && swatch.classList.contains("selected"),
+      );
+
+      function playTick(strength = 0.018) {
+        const now = Date.now();
+        if (now - lastTickAt < 70) {
+          return;
+        }
+        lastTickAt = now;
+        if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = audioContext;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = 680;
+        gain.gain.setValueAtTime(strength, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.045);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.05);
+      }
+
+      function refreshSelections() {
+        swatches.forEach((swatch) => {
+          const isSelected = swatch === lightSelection || swatch === darkSelection;
+          swatch.classList.toggle("selected", isSelected);
+        });
+      }
+
+      function applyThemeFromSelection(mode) {
+        const selection = mode === "dark" ? darkSelection : lightSelection;
+        if (!selection) {
+          return;
+        }
+        const isDark = mode === "dark";
+        body.classList.toggle("dark", isDark);
+        body.style.setProperty("--app-bg", selection.dataset.themeColor);
+        themeLabel.textContent = isDark ? "暗色" : "亮度";
+        themeIcon.textContent = isDark ? "☾" : "☀";
+        modeBadge.textContent = selection.dataset.themeName;
+      }
+
+      themeToggle.addEventListener("click", () => {
+        playTick(0.012);
+        applyThemeFromSelection(body.classList.contains("dark") ? "light" : "dark");
+      });
+
+      swatches.forEach((swatch) => {
+        swatch.addEventListener("click", () => {
+          playTick();
+          if (swatch.dataset.themeMode === "dark") {
+            darkSelection = swatch;
+            applyThemeFromSelection("dark");
+          } else {
+            lightSelection = swatch;
+            applyThemeFromSelection("light");
+          }
+          refreshSelections();
+        });
+      });
+
+      settingsToggle.addEventListener("click", () => {
+        screen.classList.add("show-sheet");
+      });
+
+      closeSheet.addEventListener("click", () => {
+        screen.classList.remove("show-sheet");
+      });
+
+      fontSlider.addEventListener("input", () => {
+        fontBadge.textContent = fontSlider.value;
+      });
+
+      marginSlider.addEventListener("input", () => {
+        marginBadge.textContent = marginLabels[Number(marginSlider.value)];
+      });
+
+      lineHeightSlider.addEventListener("input", () => {
+        lineHeightBadge.textContent = lineHeightLabels[Number(lineHeightSlider.value)];
+      });
+
+      paletteRail.addEventListener("scroll", () => {
+        playTick(0.007);
+      });
+
+      refreshSelections();
+      applyThemeFromSelection("light");
+    </script>
+  </body>
+</html>
