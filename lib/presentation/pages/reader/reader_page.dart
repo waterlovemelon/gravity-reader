@@ -1397,6 +1397,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         fontFamily: _contentFontFamily,
       );
       final chapterLabel = page.title.trim();
+      final shouldShowChapterOverlay =
+          !showChapterHeader && chapterLabel.isNotEmpty;
       final highlightRange = _resolveTtsHighlightRange(
         ttsState: ttsState,
         chapterText: chapterText,
@@ -1427,7 +1429,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      SizedBox(height: _chapterOverlayReservedHeight),
+                      if (shouldShowChapterOverlay)
+                        SizedBox(height: _chapterOverlayReservedHeight),
+                      if (showChapterHeader && chapterLabel.isNotEmpty) ...[
+                        _buildChapterHeaderTitle(chapterLabel),
+                        SizedBox(
+                          height: (_contentFontSize * 0.9).clamp(16.0, 28.0),
+                        ),
+                      ],
                       Expanded(
                         child: SizedBox(
                           width: double.infinity,
@@ -1455,7 +1464,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       ),
                     ],
                   ),
-                  if (chapterLabel.isNotEmpty)
+                  if (shouldShowChapterOverlay)
                     Positioned(
                       top: 0,
                       left: 0,
@@ -4708,10 +4717,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       chunkSize = length - start;
     }
     var end = min(length, start + chunkSize);
-    final safeHeight = max(48.0, height - _paginationSafetyInset);
 
     bool fits(int candidateEnd) {
       final showChapterHeader = start == 0;
+      final safeHeight = max(
+        48.0,
+        height -
+            _paginationSafetyInset -
+            (showChapterHeader ? _chapterHeaderBlockHeight : 0.0),
+      );
       final isLastPageOfChapter = candidateEnd >= length;
       final endsAtParagraphBoundary = _endsAtParagraphBoundary(
         chapterText: text,
@@ -5379,6 +5393,31 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   double get _chapterOverlayReservedHeight {
     final gap = (_contentFontSize * 0.22).clamp(3.0, 6.0);
     return _chapterOverlayFontSize * 1.1 + gap;
+  }
+
+  TextStyle get _chapterHeaderTitleStyle => TextStyle(
+    fontSize: (_contentFontSize * 1.52).clamp(24.0, 36.0),
+    height: 1.18,
+    fontWeight: FontWeight.w700,
+    color: _textColor,
+    fontFamily: _contentFontFamily,
+  );
+
+  double get _chapterHeaderBlockHeight {
+    final titleLineHeight =
+        _chapterHeaderTitleStyle.fontSize! * _chapterHeaderTitleStyle.height!;
+    final titleBottomGap = (_contentFontSize * 0.9).clamp(16.0, 28.0);
+    return titleLineHeight + titleBottomGap;
+  }
+
+  Widget _buildChapterHeaderTitle(String title) {
+    return Text(
+      title,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      textScaler: TextScaler.noScaling,
+      style: _chapterHeaderTitleStyle,
+    );
   }
 
   BoxFit get _readerBackgroundBoxFit {
