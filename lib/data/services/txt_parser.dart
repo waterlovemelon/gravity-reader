@@ -39,6 +39,40 @@ class TxtParser {
     r'^\s*(prologue|epilogue|preface|introduction)\s*$',
     caseSensitive: false,
   );
+  static final RegExp _markerPattern = RegExp(
+    r'第\s*[0-9零一二三四五六七八九十百千万〇两]+\s*([章节卷部篇回集])',
+  );
+
+  String? _detectDominantMarker(String text) {
+    final markerCounts = <String, int>{};
+
+    final matches = _markerPattern.allMatches(text);
+    for (final match in matches) {
+      final marker = match.group(1);
+      if (marker == null || marker.isEmpty) {
+        continue;
+      }
+      markerCounts[marker] = (markerCounts[marker] ?? 0) + 1;
+    }
+
+    if (markerCounts.isEmpty) {
+      return null;
+    }
+
+    final sorted = markerCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final dominant = sorted.first;
+    final total = markerCounts.values.fold(0, (sum, count) => sum + count);
+
+    return dominant.value / total >= 0.6 ? dominant.key : null;
+  }
+
+  RegExp _buildChapterPattern(String marker) {
+    return RegExp(
+      '^\\s*第\\s*[0-9零一二三四五六七八九十百千万〇两]+\\s*$marker\\s*\$|'
+      '^\\s*第\\s*[0-9零一二三四五六七八九十百千万〇两]+\\s*$marker(?:\\s+|[:：·.-]\\s*)[\\S ]{1,30}\$',
+    );
+  }
 
   TxtParseResult parse(String rawText, {int chunkSize = 3000}) {
     final normalizedText = rawText
@@ -50,13 +84,18 @@ class TxtParser {
       return const TxtParseResult(chapters: []);
     }
 
+    final dominantMarker = _detectDominantMarker(normalizedText);
+    final chapterPattern = dominantMarker != null
+        ? _buildChapterPattern(dominantMarker)
+        : _cnChapterPattern;
+
     final headingOffsets = <int>[];
     var lineStart = 0;
     while (lineStart < normalizedText.length) {
       final lineEnd = normalizedText.indexOf('\n', lineStart);
       final safeLineEnd = lineEnd == -1 ? normalizedText.length : lineEnd;
       final line = normalizedText.substring(lineStart, safeLineEnd);
-      if (_isChapterHeading(line)) {
+      if (_isChapterHeading(line, chapterPattern: chapterPattern)) {
         headingOffsets.add(lineStart);
       }
       if (lineEnd == -1) {
@@ -119,13 +158,13 @@ class TxtParser {
     return TxtParseResult(chapters: chapters);
   }
 
-  bool _isChapterHeading(String line) {
+  bool _isChapterHeading(String line, {required RegExp chapterPattern}) {
     final text = line.trim();
     if (text.isEmpty || text.length > 40) {
       return false;
     }
 
-    return _cnChapterPattern.hasMatch(text) ||
+    return chapterPattern.hasMatch(text) ||
         _cnVolumePattern.hasMatch(text) ||
         _cnSpecialHeadingPattern.hasMatch(text) ||
         _enChapterPattern.hasMatch(text) ||
