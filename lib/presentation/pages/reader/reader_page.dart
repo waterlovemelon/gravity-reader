@@ -1257,6 +1257,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         color: _textColor,
         fontFamily: _contentFontFamily,
       );
+      final chapterLabel = page.title.trim();
       final highlightRange = _resolveTtsHighlightRange(
         ttsState: ttsState,
         chapterText: chapterText,
@@ -1281,35 +1282,61 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           padding: _contentPadding,
           child: Builder(
             builder: (context) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              return Stack(
+                clipBehavior: Clip.none,
                 children: [
-                  Expanded(
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: RichText(
-                        textScaler: TextScaler.noScaling,
-                        textAlign: pageTextAlign,
-                        textWidthBasis: TextWidthBasis.longestLine,
-                        strutStyle: _contentStrutStyle,
-                        text: TextSpan(
-                          style: bodyStyle,
-                          children: _buildPageTextSpans(
-                            text: visibleText,
-                            bodyStyle: bodyStyle,
-                            chapterTitle: showChapterHeader ? page.title : null,
-                            startsAtParagraphBoundary:
-                                _startsAtParagraphBoundary(
-                                  chapterText: chapterText,
-                                  startOffset: safeStart,
-                                ),
-                            highlightStart: highlightRange?.start,
-                            highlightEnd: highlightRange?.end,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(height: _chapterOverlayReservedHeight),
+                      Expanded(
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: RichText(
+                            textScaler: TextScaler.noScaling,
+                            textAlign: pageTextAlign,
+                            textWidthBasis: TextWidthBasis.longestLine,
+                            strutStyle: _contentStrutStyle,
+                            text: TextSpan(
+                              style: bodyStyle,
+                              children: _buildPageTextSpans(
+                                text: visibleText,
+                                bodyStyle: bodyStyle,
+                                startsAtParagraphBoundary:
+                                    _startsAtParagraphBoundary(
+                                      chapterText: chapterText,
+                                      startOffset: safeStart,
+                                    ),
+                                highlightStart: highlightRange?.start,
+                                highlightEnd: highlightRange?.end,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (chapterLabel.isNotEmpty)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 48,
+                      child: IgnorePointer(
+                        child: Text(
+                          chapterLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textScaler: TextScaler.noScaling,
+                          style: TextStyle(
+                            fontSize: _chapterOverlayFontSize,
+                            height: 1.1,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.2,
+                            color: _readerSecondaryInfoColor,
                           ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               );
             },
@@ -1414,7 +1441,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           '${(_currentProgressPercent * 100).clamp(0, 100).toStringAsFixed(1)}%',
           style: TextStyle(
             fontSize: 13,
-            color: _textColor.withOpacity(0.55),
+            color: _readerSecondaryInfoColor,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -4328,39 +4355,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   List<InlineSpan> _buildPageTextSpans({
     required String text,
     required TextStyle bodyStyle,
-    String? chapterTitle,
     required bool startsAtParagraphBoundary,
     bool useWidgetIndent = true,
     int? highlightStart,
     int? highlightEnd,
   }) {
-    final spans = <InlineSpan>[];
-    final title = chapterTitle?.trim() ?? '';
-    if (title.isNotEmpty) {
-      spans.add(
-        TextSpan(
-          text: title,
-          style: bodyStyle.copyWith(
-            fontSize: _contentFontSize * 1.2,
-            fontWeight: FontWeight.w800,
-            height: _contentLineHeight + 0.12,
-          ),
-        ),
-      );
-      // chapter title spacing before body
-      spans.add(const TextSpan(text: '\n'));
-    }
-    spans.addAll(
-      _buildParagraphSpans(
-        text,
-        bodyStyle,
-        startsAtParagraphBoundary: startsAtParagraphBoundary,
-        useWidgetIndent: useWidgetIndent,
-        highlightStart: highlightStart,
-        highlightEnd: highlightEnd,
-      ),
+    return _buildParagraphSpans(
+      text,
+      bodyStyle,
+      startsAtParagraphBoundary: startsAtParagraphBoundary,
+      useWidgetIndent: useWidgetIndent,
+      highlightStart: highlightStart,
+      highlightEnd: highlightEnd,
     );
-    return spans;
   }
 
   List<InlineSpan> _buildHighlightedLineSpans({
@@ -4634,7 +4641,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           children: _buildPageTextSpans(
             text: visibleText,
             bodyStyle: style,
-            chapterTitle: showChapterHeader ? chapterTitle : null,
             startsAtParagraphBoundary: _startsAtParagraphBoundary(
               chapterText: text,
               startOffset: start,
@@ -5126,7 +5132,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       media.size.height -
           media.padding.top -
           media.padding.bottom -
-          _contentPadding.vertical,
+          _contentPadding.vertical -
+          _chapterOverlayReservedHeight,
     );
   }
 
@@ -5266,6 +5273,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Color get _ttsHighlightTextColor =>
       _isDarkReaderBackground ? _textColor : const Color(0xFF182118);
+
+  Color get _readerSecondaryInfoColor => _isDarkReaderBackground
+      ? Colors.white.withOpacity(0.82)
+      : _textColor.withOpacity(0.55);
+
+  double get _chapterOverlayFontSize =>
+      (_contentFontSize * 0.66).clamp(11.0, 15.0);
+
+  double get _chapterOverlayReservedHeight {
+    final gap = (_contentFontSize * 0.22).clamp(3.0, 6.0);
+    return _chapterOverlayFontSize * 1.1 + gap;
+  }
 
   BoxFit get _readerBackgroundBoxFit {
     switch (_backgroundImageFit) {

@@ -130,7 +130,7 @@ String _normalizeTxtParagraphSpacing(String text) {
 }
 
 class TxtImportCacheService {
-  static const int cacheVersion = 1;
+  static const int cacheVersion = 2;
 
   const TxtImportCacheService();
 

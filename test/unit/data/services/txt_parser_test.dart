@@ -73,5 +73,29 @@ Text of chapter two.
       expect(result.chapters[2].title, '卷一 长夜');
       expect(result.chapters[3].title, '番外');
     });
+
+    test('prefers dominant chinese marker when mixed heading styles exist', () {
+      const content = '''
+第1章 起始
+第一章正文。
+
+第2章 深入
+第二章正文。
+
+第3章 转折
+第三章正文。
+
+第1节 杂项说明
+这行不应被切成新章节。
+''';
+
+      final result = parser.parse(content);
+
+      expect(result.chapters.length, 3);
+      expect(result.chapters[0].title, '第1章 起始');
+      expect(result.chapters[1].title, '第2章 深入');
+      expect(result.chapters[2].title, '第3章 转折');
+      expect(result.chapters[2].content, contains('第1节 杂项说明'));
+    });
   });
 }
