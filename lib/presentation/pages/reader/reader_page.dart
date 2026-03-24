@@ -160,7 +160,9 @@ class _ThemeOption {
   });
 }
 
-enum _ReaderPanel { none, toc, notes, progress, theme, typography }
+enum _ReaderPanel { none, toc, notes, progress, typography }
+
+enum _SettingsPanelPage { root, fontStyle, layout, customBackground }
 
 enum _ReaderBackgroundMode { preset, customImage }
 
@@ -418,6 +420,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   static const String _prefBackgroundMode = 'reader_background_mode_v1';
   static const String _prefBackgroundPresetIndex =
       'reader_background_preset_index_v1';
+  static const String _prefBackgroundLightPresetIndex =
+      'reader_background_light_preset_index_v1';
+  static const String _prefBackgroundDarkPresetIndex =
+      'reader_background_dark_preset_index_v1';
   static const String _prefBackgroundImagePath =
       'reader_background_image_path_v1';
   static const String _prefBackgroundImageFit =
@@ -459,9 +465,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Timer? _txtOpeningViewDelayTimer;
   int _readingTimeSeconds = 0;
   _ReaderPanel _activePanel = _ReaderPanel.none;
-  double _brightnessValue = 0.65;
   int _fontSizePreset = 20;
   int _themeIndex = 2;
+  int _lightThemeIndex = 1;
+  int _darkThemeIndex = 9;
   int _paddingPreset = 1;
   int _lineHeightPreset = 2;
   _ReaderBackgroundMode _backgroundMode = _ReaderBackgroundMode.preset;
@@ -590,6 +597,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final fontStylePreset = prefs.getInt(_prefFontStylePreset);
     final backgroundModeValue = prefs.getString(_prefBackgroundMode);
     final backgroundPresetIndex = prefs.getInt(_prefBackgroundPresetIndex);
+    final backgroundLightPresetIndex = prefs.getInt(
+      _prefBackgroundLightPresetIndex,
+    );
+    final backgroundDarkPresetIndex = prefs.getInt(
+      _prefBackgroundDarkPresetIndex,
+    );
     final backgroundImagePath = prefs.getString(_prefBackgroundImagePath);
     final backgroundImageFitValue = prefs.getString(_prefBackgroundImageFit);
     final backgroundOverlayOpacity = prefs.getDouble(
@@ -646,6 +659,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       if (backgroundPresetIndex != null) {
         _themeIndex = backgroundPresetIndex.clamp(0, 11);
       }
+      if (backgroundLightPresetIndex != null) {
+        _lightThemeIndex = _clampLightThemeIndex(backgroundLightPresetIndex);
+      }
+      if (backgroundDarkPresetIndex != null) {
+        _darkThemeIndex = _clampDarkThemeIndex(backgroundDarkPresetIndex);
+      }
+      if (_isDarkThemeIndex(_themeIndex)) {
+        _darkThemeIndex = _clampDarkThemeIndex(_themeIndex);
+      } else {
+        _lightThemeIndex = _clampLightThemeIndex(_themeIndex);
+      }
       _backgroundMode = resolvedBackgroundMode;
       _customBackgroundImagePath = resolvedBackgroundImagePath;
       _backgroundImageFit = _readerBackgroundImageFitFromValue(
@@ -688,6 +712,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               : 'preset',
         );
         await prefs.setInt(_prefBackgroundPresetIndex, _themeIndex);
+        await prefs.setInt(
+          _prefBackgroundLightPresetIndex,
+          _clampLightThemeIndex(_lightThemeIndex),
+        );
+        await prefs.setInt(
+          _prefBackgroundDarkPresetIndex,
+          _clampDarkThemeIndex(_darkThemeIndex),
+        );
         if (_customBackgroundImagePath != null &&
             _customBackgroundImagePath!.isNotEmpty) {
           await prefs.setString(
@@ -744,6 +776,113 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       case _ReaderBackgroundImageFit.cover:
         return 'cover';
     }
+  }
+
+  int _clampLightThemeIndex(int value) => value.clamp(0, 7);
+
+  int _clampDarkThemeIndex(int value) => value.clamp(8, 11);
+
+  bool _isDarkThemeIndex(int value) => value >= 8;
+
+  List<_ThemeOption> get _presetThemes => [
+    _ThemeOption(
+      id: 0,
+      color: const Color(0xFFF3F3F3),
+      name: _text(zh: '浅色', en: 'Light'),
+      icon: Icons.light_mode_rounded,
+    ),
+    _ThemeOption(
+      id: 1,
+      color: const Color(0xFFE8E2D6),
+      name: _text(zh: '米色', en: 'Beige'),
+      icon: Icons.brightness_4_rounded,
+    ),
+    _ThemeOption(
+      id: 2,
+      color: const Color(0xFFF1F4EE),
+      name: _text(zh: '薄荷绿', en: 'Mint'),
+      icon: Icons.emoji_nature_rounded,
+    ),
+    _ThemeOption(
+      id: 3,
+      color: const Color(0xFFA6C39D),
+      name: _text(zh: '浅绿', en: 'Soft Green'),
+      icon: Icons.nature_rounded,
+    ),
+    _ThemeOption(
+      id: 4,
+      color: const Color(0xFFF5ECD7),
+      name: _text(zh: '羊皮纸', en: 'Parchment'),
+      icon: Icons.auto_stories_rounded,
+    ),
+    _ThemeOption(
+      id: 5,
+      color: const Color(0xFFE3EBF2),
+      name: _text(zh: '雾蓝', en: 'Mist Blue'),
+      icon: Icons.water_drop_outlined,
+    ),
+    _ThemeOption(
+      id: 6,
+      color: const Color(0xFFF5E8EA),
+      name: _text(zh: '玫瑰粉', en: 'Rose Pink'),
+      icon: Icons.local_florist_outlined,
+    ),
+    _ThemeOption(
+      id: 7,
+      color: const Color(0xFFFFF8E7),
+      name: _text(zh: '奶油黄', en: 'Cream Yellow'),
+      icon: Icons.wb_sunny_outlined,
+    ),
+    _ThemeOption(
+      id: 8,
+      color: const Color(0xFF121212),
+      name: _text(zh: '深灰', en: 'Dark Gray'),
+      icon: Icons.dark_mode_rounded,
+    ),
+    _ThemeOption(
+      id: 9,
+      color: const Color(0xFF1A1B26),
+      name: _text(zh: '深靛', en: 'Deep Indigo'),
+      icon: Icons.nights_stay_outlined,
+    ),
+    _ThemeOption(
+      id: 10,
+      color: const Color(0xFF1C1C1C),
+      name: _text(zh: '深咖', en: 'Dark Brown'),
+      icon: Icons.coffee_outlined,
+    ),
+    _ThemeOption(
+      id: 11,
+      color: const Color(0xFF1A2A1F),
+      name: _text(zh: '墨绿', en: 'Ink Green'),
+      icon: Icons.forest_outlined,
+    ),
+  ];
+
+  void _activatePresetTheme(int themeIndex, {bool syncQuickSelection = true}) {
+    final resolvedThemeIndex = themeIndex.clamp(0, _presetThemes.length - 1);
+    setState(() {
+      _backgroundMode = _ReaderBackgroundMode.preset;
+      _themeIndex = resolvedThemeIndex;
+      if (syncQuickSelection) {
+        if (_isDarkThemeIndex(resolvedThemeIndex)) {
+          _darkThemeIndex = _clampDarkThemeIndex(resolvedThemeIndex);
+        } else {
+          _lightThemeIndex = _clampLightThemeIndex(resolvedThemeIndex);
+        }
+      }
+    });
+    HapticFeedback.selectionClick();
+    _scheduleSaveReaderPreferences();
+  }
+
+  void _toggleQuickBrightnessTheme() {
+    final nextThemeIndex = _backgroundMode == _ReaderBackgroundMode.customImage
+        ? _lightThemeIndex
+        : _isDarkThemeIndex(_themeIndex)
+        ? _lightThemeIndex
+        : _darkThemeIndex;
+    _activatePresetTheme(nextThemeIndex, syncQuickSelection: false);
   }
 
   Future<double?> _computeImageBrightness(String path) async {
@@ -1516,17 +1655,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     }),
                   ),
                   _toolButton(
-                    icon: CupertinoIcons.sun_max,
-                    active: _activePanel == _ReaderPanel.theme,
-                    onTap: () => _openPanel(_ReaderPanel.theme, () async {
-                      await _showThemePanel();
-                    }),
+                    icon: _isDarkReaderBackground
+                        ? CupertinoIcons.moon_fill
+                        : CupertinoIcons.sun_max_fill,
+                    active: true,
+                    onTap: _toggleQuickBrightnessTheme,
                   ),
                   _toolButton(
-                    icon: CupertinoIcons.textformat_size,
+                    icon: CupertinoIcons.slider_horizontal_3,
                     active: _activePanel == _ReaderPanel.typography,
                     onTap: () => _openPanel(_ReaderPanel.typography, () async {
-                      await _showTypographyPanel();
+                      await _showSettingsPanel();
                     }),
                   ),
                 ],
@@ -1738,413 +1877,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  Future<void> _showThemePanel() async {
-    const themeCardWidth = 112.0;
-    const themeCardSpacing = 12.0;
-    final viewportWidth = MediaQuery.of(context).size.width - 32;
-    final initialOffset = max(
-      0.0,
-      _themeIndex * (themeCardWidth + themeCardSpacing) -
-          (viewportWidth - themeCardWidth) / 2,
-    );
-    final presetThemeScrollController = ScrollController(
-      initialScrollOffset: initialOffset,
-    );
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _controlSurfaceColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          final backgroundColor = _controlSurfaceColor;
-          final textColor = _textColor;
-
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            color: backgroundColor,
-            child: SafeArea(
-              child: DraggableScrollableSheet(
-                expand: false,
-                initialChildSize: 0.82,
-                minChildSize: 0.56,
-                maxChildSize: 0.94,
-                builder: (context, scrollController) {
-                  return SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 38,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: textColor.withOpacity(0.22),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Center(
-                          child: Text(
-                            _text(zh: '亮度与正文背景', en: 'Brightness & Background'),
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: textColor,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: _readerBgColor,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 15,
-                                offset: const Offset(0, 5),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          width: 36,
-                                          height: 36,
-                                          alignment: Alignment.center,
-                                          decoration: BoxDecoration(
-                                            color: _textColor.withOpacity(0.06),
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          child: Icon(
-                                            Icons.brightness_6_rounded,
-                                            size: 18,
-                                            color: _textColor.withOpacity(0.7),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          _text(zh: '亮度', en: 'Brightness'),
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w600,
-                                            color: _textColor,
-                                            letterSpacing: 0.3,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(
-                                          0xFF3B82F6,
-                                        ).withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        '${(_brightnessValue * 100).round()}%',
-                                        style: const TextStyle(
-                                          color: Color(0xFF3B82F6),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.brightness_2_rounded,
-                                      size: 20,
-                                      color: _textColor.withOpacity(0.4),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      flex: 3,
-                                      child: Theme(
-                                        data: Theme.of(context).copyWith(
-                                          sliderTheme: SliderThemeData(
-                                            activeTrackColor: const Color(
-                                              0xFF3B82F6,
-                                            ),
-                                            inactiveTrackColor: _textColor
-                                                .withOpacity(0.15),
-                                            thumbColor: const Color(0xFF3B82F6),
-                                            overlayColor: const Color(
-                                              0xFF3B82F6,
-                                            ).withOpacity(0.1),
-                                            trackHeight: 4,
-                                            thumbShape:
-                                                const RoundSliderThumbShape(
-                                                  enabledThumbRadius: 10,
-                                                ),
-                                            overlayShape:
-                                                const RoundSliderOverlayShape(
-                                                  overlayRadius: 18,
-                                                ),
-                                            showValueIndicator:
-                                                ShowValueIndicator
-                                                    .onlyForDiscrete,
-                                          ),
-                                        ),
-                                        child: Slider(
-                                          value: _brightnessValue,
-                                          min: 0,
-                                          max: 1,
-                                          divisions: 20,
-                                          label:
-                                              '${(_brightnessValue * 100).round()}%',
-                                          onChanged: (v) {
-                                            setState(
-                                              () => _brightnessValue = v,
-                                            );
-                                            setModalState(
-                                              () => _brightnessValue = v,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Icon(
-                                      Icons.brightness_7_rounded,
-                                      size: 20,
-                                      color: _textColor.withOpacity(0.4),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _themeSectionTitle(
-                          _text(zh: '纯色背景', en: 'Solid Background'),
-                        ),
-                        const SizedBox(height: 10),
-                        _buildPresetThemeStrip(
-                          presetThemeScrollController,
-                          setModalState,
-                        ),
-                        const SizedBox(height: 18),
-                        _themeSectionTitle(
-                          _text(zh: '自定义图片', en: 'Custom Image'),
-                        ),
-                        const SizedBox(height: 10),
-                        _buildCustomBackgroundPreviewCard(),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _modernActionButton(
-                                label: _isPickingBackgroundImage
-                                    ? _text(zh: '选择中...', en: 'Selecting...')
-                                    : _text(zh: '更换图片', en: 'Change Image'),
-                                isSecondary: false,
-                                icon: Icons.photo_library_outlined,
-                                onTap: _isPickingBackgroundImage
-                                    ? null
-                                    : () async {
-                                        await _pickCustomBackgroundImage();
-                                        if (mounted) {
-                                          setModalState(() {});
-                                        }
-                                      },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _modernActionButton(
-                                label: _text(zh: '恢复纯色', en: 'Restore Solid'),
-                                isSecondary: true,
-                                icon: Icons.layers_clear_outlined,
-                                onTap: _isCustomBackgroundActive
-                                    ? () {
-                                        _clearCustomBackgroundImage();
-                                        setModalState(() {});
-                                      }
-                                    : null,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        _buildBackgroundControlCard(
-                          title: _text(zh: '显示方式', en: 'Display Mode'),
-                          subtitle: _backgroundImageFitLabel,
-                          enabled: _isCustomBackgroundActive,
-                          child: Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              _backgroundFitChip(
-                                label: _text(zh: '填充', en: 'Fill'),
-                                fit: _ReaderBackgroundImageFit.cover,
-                                onChanged: setModalState,
-                              ),
-                              _backgroundFitChip(
-                                label: _text(zh: '适应', en: 'Fit'),
-                                fit: _ReaderBackgroundImageFit.contain,
-                                onChanged: setModalState,
-                              ),
-                              _backgroundFitChip(
-                                label: _text(zh: '拉伸', en: 'Stretch'),
-                                fit: _ReaderBackgroundImageFit.fill,
-                                onChanged: setModalState,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildBackgroundControlCard(
-                          title: _text(zh: '遮罩强度', en: 'Overlay Strength'),
-                          subtitle:
-                              '${(_backgroundOverlayOpacity * 100).round()}%',
-                          enabled: _isCustomBackgroundActive,
-                          child: _buildThemedSlider(
-                            value: _backgroundOverlayOpacity,
-                            min: 0,
-                            max: 0.6,
-                            divisions: 12,
-                            onChanged: _isCustomBackgroundActive
-                                ? (value) {
-                                    setState(() {
-                                      _backgroundOverlayOpacity = value;
-                                    });
-                                    _scheduleSaveReaderPreferences();
-                                    setModalState(() {});
-                                  }
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildBackgroundControlCard(
-                          title: _text(zh: '背景模糊', en: 'Background Blur'),
-                          subtitle: _backgroundBlurSigma.toStringAsFixed(1),
-                          enabled: _isCustomBackgroundActive,
-                          child: _buildThemedSlider(
-                            value: _backgroundBlurSigma,
-                            min: 0,
-                            max: 12,
-                            divisions: 12,
-                            onChanged: _isCustomBackgroundActive
-                                ? (value) {
-                                    setState(() {
-                                      _backgroundBlurSigma = value;
-                                    });
-                                    _scheduleSaveReaderPreferences();
-                                    setModalState(() {});
-                                  }
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    presetThemeScrollController.dispose();
-  }
-
-  Widget _ColorOptionCard({
-    required _ThemeOption theme,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: theme.color,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF3B82F6) : Colors.transparent,
-              width: isSelected ? 3 : 0,
-            ),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF3B82F6).withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  theme.icon,
-                  size: 28,
-                  color: theme.id == 3
-                      ? Colors.white.withOpacity(0.9)
-                      : Colors.black87.withOpacity(0.7),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  theme.name,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    color: theme.id == 3
-                        ? Colors.white.withOpacity(0.9)
-                        : Colors.black87.withOpacity(0.7),
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   String get _backgroundImageFitLabel {
     switch (_backgroundImageFit) {
       case _ReaderBackgroundImageFit.contain:
@@ -2156,129 +1888,894 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
   }
 
-  Widget _themeSectionTitle(String title) {
-    return Text(
-      title,
-      style: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w700,
-        color: _textColor.withOpacity(0.88),
-        letterSpacing: 0.2,
+  Future<void> _showSettingsPanel() async {
+    final currentIndex = _backgroundMode == _ReaderBackgroundMode.preset
+        ? _themeIndex
+        : _lightThemeIndex;
+    final rootPageKey = GlobalKey();
+    double? rootPageHeight;
+    var currentPage = _SettingsPanelPage.root;
+    var previousPage = _SettingsPanelPage.root;
+    const swatchWidth = 58.0;
+    const swatchSpacing = 8.0;
+    final viewportWidth = MediaQuery.of(context).size.width - 76;
+    final initialOffset = max(
+      0.0,
+      currentIndex * (swatchWidth + swatchSpacing) -
+          (viewportWidth - swatchWidth) / 2,
+    );
+    final paletteController = ScrollController(
+      initialScrollOffset: initialOffset,
+    );
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final fontSize = _fontSizePreset.clamp(16, 40);
+          final isForward = currentPage.index >= previousPage.index;
+          void syncRootPageHeight() {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              final measuredHeight = rootPageKey.currentContext?.size?.height;
+              if (measuredHeight == null) {
+                return;
+              }
+              if (rootPageHeight == null ||
+                  (rootPageHeight! - measuredHeight).abs() > 1) {
+                rootPageHeight = measuredHeight;
+                if (mounted) {
+                  setModalState(() {});
+                }
+              }
+            });
+          }
+
+          void navigateTo(_SettingsPanelPage page) {
+            previousPage = currentPage;
+            currentPage = page;
+            setModalState(() {});
+          }
+
+          Widget buildPanelScrollView({
+            required Widget child,
+            Key? key,
+            double bottomPadding = 0,
+          }) {
+            return ColoredBox(
+              color: _controlSurfaceColor,
+              child: SingleChildScrollView(
+                child: ConstrainedBox(
+                  key: key,
+                  constraints: BoxConstraints(
+                    minHeight: currentPage == _SettingsPanelPage.root
+                        ? 0
+                        : (rootPageHeight ?? 0),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: bottomPadding),
+                    child: child,
+                  ),
+                ),
+              ),
+            );
+          }
+
+          if (currentPage == _SettingsPanelPage.root) {
+            syncRootPageHeight();
+          }
+
+          return ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              decoration: BoxDecoration(
+                color: _controlSurfaceColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(18),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 38,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: _textColor.withOpacity(0.22),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeOutCubic,
+                          layoutBuilder: (currentChild, previousChildren) =>
+                              ClipRect(
+                                child: Stack(
+                                  alignment: Alignment.topCenter,
+                                  children: [
+                                    ...previousChildren,
+                                    if (currentChild != null) currentChild,
+                                  ],
+                                ),
+                              ),
+                          transitionBuilder: (child, animation) {
+                            final begin = Offset(isForward ? 0.16 : -0.16, 0);
+                            return ClipRect(
+                              child: SlideTransition(
+                                position: Tween<Offset>(
+                                  begin: begin,
+                                  end: Offset.zero,
+                                ).animate(animation),
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: KeyedSubtree(
+                            key: ValueKey(currentPage),
+                            child: switch (currentPage) {
+                              _SettingsPanelPage.root => buildPanelScrollView(
+                                key: rootPageKey,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildSettingsSection(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildSectionHeader(
+                                            title: _text(
+                                              zh: '背景',
+                                              en: 'Background',
+                                            ),
+                                            value:
+                                                _presetThemes[_themeIndex].name,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          SizedBox(
+                                            height: 60,
+                                            child: ListView.separated(
+                                              controller: paletteController,
+                                              scrollDirection: Axis.horizontal,
+                                              physics:
+                                                  const BouncingScrollPhysics(),
+                                              itemCount: _presetThemes.length,
+                                              separatorBuilder: (_, _) =>
+                                                  const SizedBox(width: 8),
+                                              itemBuilder: (context, index) {
+                                                final theme =
+                                                    _presetThemes[index];
+                                                final isActive =
+                                                    _backgroundMode ==
+                                                        _ReaderBackgroundMode
+                                                            .preset &&
+                                                    _themeIndex == index;
+                                                final isStored =
+                                                    index == _lightThemeIndex ||
+                                                    index == _darkThemeIndex;
+                                                return _buildThemeSwatch(
+                                                  theme: theme,
+                                                  isActive: isActive,
+                                                  isStored: isStored,
+                                                  onTap: () {
+                                                    _activatePresetTheme(index);
+                                                    setModalState(() {});
+                                                  },
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _buildCompactSettingRow(
+                                            title: _text(
+                                              zh: '自定义图片背景',
+                                              en: 'Custom Image Background',
+                                            ),
+                                            subtitle: _isCustomBackgroundActive
+                                                ? _text(
+                                                    zh: '已设置',
+                                                    en: 'Configured',
+                                                  )
+                                                : _text(
+                                                    zh: '未设置',
+                                                    en: 'Not set',
+                                                  ),
+                                            onTap: () => navigateTo(
+                                              _SettingsPanelPage
+                                                  .customBackground,
+                                            ),
+                                            isLast: true,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildSettingsSection(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildSectionHeader(
+                                            title: _text(
+                                              zh: '字体与排版',
+                                              en: 'Typography',
+                                            ),
+                                            value: '$fontSize',
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            children: [
+                                              _buildScaleMark(
+                                                label: 'A',
+                                                small: true,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: _buildThemedSlider(
+                                                  value: fontSize.toDouble(),
+                                                  min: 16,
+                                                  max: 40,
+                                                  divisions: 12,
+                                                  onChanged: (v) {
+                                                    setState(() {
+                                                      _fontSizePreset = v
+                                                          .round()
+                                                          .clamp(16, 40);
+                                                    });
+                                                    _scheduleSaveReaderPreferences();
+                                                    _scheduleRepaginate();
+                                                    setModalState(() {});
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              _buildScaleMark(
+                                                label: 'A',
+                                                small: false,
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+                                          _buildCompactSettingRow(
+                                            title: _text(
+                                              zh: '字体样式',
+                                              en: 'Font Style',
+                                            ),
+                                            subtitle: _text(
+                                              zh: '默认',
+                                              en: 'Default',
+                                            ),
+                                            onTap: () => navigateTo(
+                                              _SettingsPanelPage.fontStyle,
+                                            ),
+                                          ),
+                                          _buildCompactSettingRow(
+                                            title: _text(
+                                              zh: '版式',
+                                              en: 'Layout',
+                                            ),
+                                            subtitle:
+                                                '${_paddingPreset == 0
+                                                    ? _text(zh: '边距小', en: 'Small margin')
+                                                    : _paddingPreset == 1
+                                                    ? _text(zh: '边距中', en: 'Medium margin')
+                                                    : _text(zh: '边距大', en: 'Large margin')} / ${_lineHeightPreset <= 1
+                                                    ? _text(zh: '行距紧', en: 'Tight')
+                                                    : _lineHeightPreset == 2
+                                                    ? _text(zh: '行距适中', en: 'Medium')
+                                                    : _text(zh: '行距松', en: 'Loose')}',
+                                            emphasis: false,
+                                            onTap: () => navigateTo(
+                                              _SettingsPanelPage.layout,
+                                            ),
+                                            isLast: true,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _SettingsPanelPage.fontStyle =>
+                                buildPanelScrollView(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _buildInlineSubpageHeader(
+                                        title: _text(
+                                          zh: '字体样式',
+                                          en: 'Font Style',
+                                        ),
+                                        onBack: () =>
+                                            navigateTo(_SettingsPanelPage.root),
+                                      ),
+                                      _buildSettingsSection(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            _panelSubTitle(
+                                              _text(zh: '字体', en: 'Font'),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _segmentedChoices(
+                                              labels: [
+                                                _text(zh: '默认', en: 'Default'),
+                                                _text(zh: '衬线', en: 'Serif'),
+                                                _text(zh: '等宽', en: 'Mono'),
+                                              ],
+                                              selectedIndex: _fontStylePreset,
+                                              onSelect: (index) {
+                                                setState(() {
+                                                  _fontStylePreset = index
+                                                      .clamp(0, 2);
+                                                });
+                                                _scheduleSaveReaderPreferences();
+                                                _scheduleRepaginate();
+                                                setModalState(() {});
+                                              },
+                                            ),
+                                            const SizedBox(height: 12),
+                                            _panelSubTitle(
+                                              _text(zh: '布局方式', en: 'Layout'),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _segmentedChoices(
+                                              labels: [
+                                                _text(zh: '自动', en: 'Auto'),
+                                                _text(zh: '两端', en: 'Justify'),
+                                                _text(zh: '左对齐', en: 'Left'),
+                                                _text(zh: '居中', en: 'Center'),
+                                              ],
+                                              selectedIndex: _textAlignPreset,
+                                              onSelect: (index) {
+                                                setState(() {
+                                                  _textAlignPreset = index
+                                                      .clamp(0, 3);
+                                                });
+                                                _scheduleSaveReaderPreferences();
+                                                _scheduleRepaginate();
+                                                setModalState(() {});
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              _SettingsPanelPage.layout => buildPanelScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildInlineSubpageHeader(
+                                      title: _text(zh: '版式', en: 'Layout'),
+                                      onBack: () =>
+                                          navigateTo(_SettingsPanelPage.root),
+                                    ),
+                                    _buildBackgroundControlCard(
+                                      title: _text(zh: '边距', en: 'Margin'),
+                                      subtitle: _paddingPreset == 0
+                                          ? _text(zh: '小', en: 'Small')
+                                          : _paddingPreset == 1
+                                          ? _text(zh: '中', en: 'Medium')
+                                          : _text(zh: '大', en: 'Large'),
+                                      enabled: true,
+                                      child: _buildThemedSlider(
+                                        value: _paddingPreset.toDouble(),
+                                        min: 0,
+                                        max: 2,
+                                        divisions: 2,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _paddingPreset = value
+                                                .round()
+                                                .clamp(0, 2);
+                                          });
+                                          _scheduleSaveReaderPreferences();
+                                          _scheduleRepaginate();
+                                          setModalState(() {});
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _buildBackgroundControlCard(
+                                      title: _text(zh: '行距', en: 'Line Height'),
+                                      subtitle: _lineHeightPreset <= 1
+                                          ? _text(zh: '紧', en: 'Tight')
+                                          : _lineHeightPreset == 2
+                                          ? _text(zh: '适中', en: 'Medium')
+                                          : _text(zh: '松', en: 'Loose'),
+                                      enabled: true,
+                                      child: _buildThemedSlider(
+                                        value:
+                                            (_lineHeightPreset <= 1
+                                                    ? 0
+                                                    : _lineHeightPreset == 2
+                                                    ? 1
+                                                    : 2)
+                                                .toDouble(),
+                                        min: 0,
+                                        max: 2,
+                                        divisions: 2,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _lineHeightPreset =
+                                                value.round() == 0
+                                                ? 1
+                                                : value.round() == 1
+                                                ? 2
+                                                : 3;
+                                          });
+                                          _scheduleSaveReaderPreferences();
+                                          _scheduleRepaginate();
+                                          setModalState(() {});
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _buildSettingsSection(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _panelSubTitle(
+                                            _text(zh: '首行缩进', en: 'Indent'),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          _segmentedChoices(
+                                            labels: [
+                                              _text(
+                                                zh: '首行缩进',
+                                                en: 'First-line indent',
+                                              ),
+                                              _text(
+                                                zh: '首行顶格',
+                                                en: 'Flush left',
+                                              ),
+                                            ],
+                                            selectedIndex:
+                                                _paragraphIndentEnabled ? 0 : 1,
+                                            onSelect: (index) {
+                                              setState(() {
+                                                _paragraphIndentEnabled =
+                                                    index == 0;
+                                              });
+                                              _scheduleSaveReaderPreferences();
+                                              _scheduleRepaginate();
+                                              setModalState(() {});
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              _SettingsPanelPage.customBackground => buildPanelScrollView(
+                                bottomPadding: 2,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildInlineSubpageHeader(
+                                      title: _text(
+                                        zh: '自定义图片背景',
+                                        en: 'Custom Image Background',
+                                      ),
+                                      onBack: () =>
+                                          navigateTo(_SettingsPanelPage.root),
+                                    ),
+                                    _buildCustomBackgroundPreviewCard(),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _modernActionButton(
+                                            label: _isPickingBackgroundImage
+                                                ? _text(
+                                                    zh: '选择中...',
+                                                    en: 'Selecting...',
+                                                  )
+                                                : _text(
+                                                    zh: '更换图片',
+                                                    en: 'Change Image',
+                                                  ),
+                                            isSecondary: false,
+                                            icon: Icons.photo_library_outlined,
+                                            onTap: _isPickingBackgroundImage
+                                                ? null
+                                                : () async {
+                                                    await _pickCustomBackgroundImage();
+                                                    if (mounted) {
+                                                      setModalState(() {});
+                                                    }
+                                                  },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: _modernActionButton(
+                                            label: _text(
+                                              zh: '恢复纯色',
+                                              en: 'Restore Solid',
+                                            ),
+                                            isSecondary: true,
+                                            icon: Icons.layers_clear_outlined,
+                                            onTap: _isCustomBackgroundActive
+                                                ? () {
+                                                    _clearCustomBackgroundImage();
+                                                    setModalState(() {});
+                                                  }
+                                                : null,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    _buildSettingsSection(
+                                      child: Opacity(
+                                        opacity: _isCustomBackgroundActive
+                                            ? 1
+                                            : 0.55,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            _buildEmbeddedBackgroundControl(
+                                              title: _text(
+                                                zh: '显示方式',
+                                                en: 'Display Mode',
+                                              ),
+                                              subtitle:
+                                                  _backgroundImageFitLabel,
+                                              child: Wrap(
+                                                spacing: 8,
+                                                runSpacing: 8,
+                                                children: [
+                                                  _backgroundFitChip(
+                                                    label: _text(
+                                                      zh: '填充',
+                                                      en: 'Fill',
+                                                    ),
+                                                    fit:
+                                                        _ReaderBackgroundImageFit
+                                                            .cover,
+                                                    onChanged: setModalState,
+                                                  ),
+                                                  _backgroundFitChip(
+                                                    label: _text(
+                                                      zh: '适应',
+                                                      en: 'Fit',
+                                                    ),
+                                                    fit:
+                                                        _ReaderBackgroundImageFit
+                                                            .contain,
+                                                    onChanged: setModalState,
+                                                  ),
+                                                  _backgroundFitChip(
+                                                    label: _text(
+                                                      zh: '拉伸',
+                                                      en: 'Stretch',
+                                                    ),
+                                                    fit:
+                                                        _ReaderBackgroundImageFit
+                                                            .fill,
+                                                    onChanged: setModalState,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _buildEmbeddedBackgroundControl(
+                                              title: _text(
+                                                zh: '遮罩强度',
+                                                en: 'Overlay Strength',
+                                              ),
+                                              subtitle:
+                                                  '${(_backgroundOverlayOpacity * 100).round()}%',
+                                              showDivider: true,
+                                              child: _buildThemedSlider(
+                                                value:
+                                                    _backgroundOverlayOpacity,
+                                                min: 0,
+                                                max: 0.6,
+                                                divisions: 12,
+                                                onChanged:
+                                                    _isCustomBackgroundActive
+                                                    ? (value) {
+                                                        setState(() {
+                                                          _backgroundOverlayOpacity =
+                                                              value;
+                                                        });
+                                                        _scheduleSaveReaderPreferences();
+                                                        setModalState(() {});
+                                                      }
+                                                    : null,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _buildEmbeddedBackgroundControl(
+                                              title: _text(
+                                                zh: '背景模糊',
+                                                en: 'Background Blur',
+                                              ),
+                                              subtitle: _backgroundBlurSigma
+                                                  .toStringAsFixed(1),
+                                              showDivider: true,
+                                              child: _buildThemedSlider(
+                                                value: _backgroundBlurSigma,
+                                                min: 0,
+                                                max: 12,
+                                                divisions: 12,
+                                                onChanged:
+                                                    _isCustomBackgroundActive
+                                                    ? (value) {
+                                                        setState(() {
+                                                          _backgroundBlurSigma =
+                                                              value;
+                                                        });
+                                                        _scheduleSaveReaderPreferences();
+                                                        setModalState(() {});
+                                                      }
+                                                    : null,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    paletteController.dispose();
+  }
+
+  Widget _buildSettingsSection({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _readerBgColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: child,
+    );
+  }
+
+  Widget _buildSectionHeader({required String title, required String value}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: _textColor,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF3B82F6).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF3B82F6),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInlineSubpageHeader({
+    required String title,
+    required VoidCallback onBack,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            splashRadius: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: onBack,
+            icon: Icon(
+              Icons.chevron_left_rounded,
+              color: _textColor.withOpacity(0.72),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: _textColor,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _selectPresetTheme(int themeIndex) {
-    setState(() {
-      _backgroundMode = _ReaderBackgroundMode.preset;
-      _themeIndex = themeIndex.clamp(0, 11);
-    });
-    _scheduleSaveReaderPreferences();
+  Widget _buildThemeSwatch({
+    required _ThemeOption theme,
+    required bool isActive,
+    required bool isStored,
+    required VoidCallback onTap,
+  }) {
+    final isDarkTheme = _isDarkThemeIndex(theme.id);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 58,
+        decoration: BoxDecoration(
+          color: theme.color,
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: isActive ? const Color(0xFF3B82F6) : Colors.transparent,
+            width: isActive ? 2 : 1,
+          ),
+          boxShadow: [
+            if (isActive)
+              BoxShadow(
+                color: const Color(0xFF3B82F6).withOpacity(0.18),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            else
+              BoxShadow(
+                color: (isStored ? const Color(0xFF3B82F6) : Colors.black)
+                    .withOpacity(isStored ? 0.08 : 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+          ],
+        ),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.only(bottom: 7),
+            width: 20,
+            height: 4,
+            decoration: BoxDecoration(
+              color: isStored
+                  ? (isDarkTheme ? Colors.white : const Color(0xFF3B82F6))
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
-  Widget _buildPresetThemeStrip(
-    ScrollController controller,
-    void Function(void Function()) setModalState,
-  ) {
-    return SizedBox(
-      height: 148,
-      child: ListView.separated(
-        controller: controller,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(right: 4),
-        itemCount: 12,
-        separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          final theme = [
-            // 白天模式 (8种)
-            _ThemeOption(
-              id: 0,
-              color: const Color(0xFFF3F3F3),
-              name: _text(zh: '浅色', en: 'Light'),
-              icon: Icons.light_mode_rounded,
-            ),
-            _ThemeOption(
-              id: 1,
-              color: const Color(0xFFE8E2D6),
-              name: _text(zh: '米色', en: 'Beige'),
-              icon: Icons.brightness_4_rounded,
-            ),
-            _ThemeOption(
-              id: 2,
-              color: const Color(0xFFF1F4EE),
-              name: _text(zh: '薄荷绿', en: 'Mint'),
-              icon: Icons.emoji_nature_rounded,
-            ),
-            _ThemeOption(
-              id: 3,
-              color: const Color(0xFFA6C39D),
-              name: _text(zh: '浅绿', en: 'Soft Green'),
-              icon: Icons.nature_rounded,
-            ),
-            _ThemeOption(
-              id: 4,
-              color: const Color(0xFFF5ECD7),
-              name: _text(zh: '羊皮纸', en: 'Parchment'),
-              icon: Icons.auto_stories_rounded,
-            ),
-            _ThemeOption(
-              id: 5,
-              color: const Color(0xFFE3EBF2),
-              name: _text(zh: '雾蓝', en: 'Mist Blue'),
-              icon: Icons.water_drop_outlined,
-            ),
-            _ThemeOption(
-              id: 6,
-              color: const Color(0xFFF5E8EA),
-              name: _text(zh: '玫瑰粉', en: 'Rose Pink'),
-              icon: Icons.local_florist_outlined,
-            ),
-            _ThemeOption(
-              id: 7,
-              color: const Color(0xFFFFF8E7),
-              name: _text(zh: '奶油黄', en: 'Cream Yellow'),
-              icon: Icons.wb_sunny_outlined,
-            ),
-            // 夜晚模式 (4种)
-            _ThemeOption(
-              id: 8,
-              color: const Color(0xFF121212),
-              name: _text(zh: '深灰', en: 'Dark Gray'),
-              icon: Icons.dark_mode_rounded,
-            ),
-            _ThemeOption(
-              id: 9,
-              color: const Color(0xFF1A1B26),
-              name: _text(zh: '深靛', en: 'Deep Indigo'),
-              icon: Icons.nights_stay_outlined,
-            ),
-            _ThemeOption(
-              id: 10,
-              color: const Color(0xFF1C1C1C),
-              name: _text(zh: '深咖', en: 'Dark Brown'),
-              icon: Icons.coffee_outlined,
-            ),
-            _ThemeOption(
-              id: 11,
-              color: const Color(0xFF1A2A1F),
-              name: _text(zh: '墨绿', en: 'Ink Green'),
-              icon: Icons.forest_outlined,
-            ),
-          ][index];
-          return SizedBox(
-            width: 112,
-            child: _ColorOptionCard(
-              theme: theme,
-              isSelected:
-                  _backgroundMode == _ReaderBackgroundMode.preset &&
-                  _themeIndex == index,
-              onTap: () {
-                _selectPresetTheme(index);
-                setModalState(() {});
-              },
-            ),
-          );
-        },
+  Widget _buildScaleMark({required String label, required bool small}) {
+    return Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _textColor.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: small ? 13 : 22,
+          color: _textColor.withOpacity(0.7),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactSettingRow({
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool emphasis = true,
+    bool isLast = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: isLast
+                ? null
+                : Border(
+                    bottom: BorderSide(color: _textColor.withOpacity(0.08)),
+                  ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: _textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: emphasis
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        color: _textColor.withOpacity(emphasis ? 0.62 : 0.54),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: _textColor.withOpacity(0.38),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2379,19 +2876,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           );
 
     return Container(
-      height: 178,
+      height: 148,
       decoration: BoxDecoration(
         color: _readerBgColor,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2432,7 +2929,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Expanded(child: preview),
         ],
       ),
@@ -2450,16 +2947,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       child: Container(
         decoration: BoxDecoration(
           color: _readerBgColor,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2469,7 +2966,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   child: Text(
                     title,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w600,
                       color: _textColor,
                     ),
@@ -2478,17 +2975,62 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 Text(
                   subtitle,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                     color: const Color(0xFF3B82F6),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             child,
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmbeddedBackgroundControl({
+    required String title,
+    required String subtitle,
+    required Widget child,
+    bool showDivider = false,
+  }) {
+    return Container(
+      padding: EdgeInsets.only(top: showDivider ? 8 : 0),
+      decoration: BoxDecoration(
+        border: showDivider
+            ? Border(top: BorderSide(color: _textColor.withOpacity(0.08)))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _textColor,
+                  ),
+                ),
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF3B82F6),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          child,
+        ],
       ),
     );
   }
@@ -2513,7 +3055,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               }
             : null,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
             color: selected
                 ? const Color(0xFF3B82F6)
@@ -2523,466 +3065,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 12.5,
               fontWeight: FontWeight.w600,
               color: selected ? Colors.white : _textColor.withOpacity(0.82),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showTypographyPanel() async {
-    final paddingLabels = [
-      _text(zh: '小', en: 'Small'),
-      _text(zh: '边距', en: 'Margin'),
-      _text(zh: '大', en: 'Large'),
-    ];
-    final lineHeightLabels = [
-      _text(zh: '紧', en: 'Tight'),
-      _text(zh: '行距', en: 'Line'),
-      _text(zh: '松', en: 'Loose'),
-    ];
-
-    await _showReaderActionPanel(
-      title: _text(zh: '字体设置', en: 'Typography'),
-      child: StatefulBuilder(
-        builder: (context, setModalState) {
-          final fontSize = _fontSizePreset.clamp(16, 40);
-          final lineHeightDisplayIndex = _lineHeightPreset <= 1
-              ? 0
-              : _lineHeightPreset == 2
-              ? 1
-              : 2;
-
-          void updateTypography({
-            int? font,
-            int? padding,
-            int? lineHeight,
-            bool repaginate = true,
-          }) {
-            setState(() {
-              if (font != null) {
-                _fontSizePreset = font.clamp(16, 40);
-              }
-              if (padding != null) {
-                _paddingPreset = padding.clamp(0, 2);
-              }
-              if (lineHeight != null) {
-                _lineHeightPreset = lineHeight.clamp(0, 3);
-              }
-            });
-            setModalState(() {});
-            _scheduleSaveReaderPreferences();
-            if (repaginate) {
-              _scheduleRepaginate();
-            }
-          }
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              // Font size card with modern Bento Grid style
-              Container(
-                decoration: BoxDecoration(
-                  color: _readerBgColor,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 15,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    // Header label
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _text(zh: '字体大小', en: 'Font Size'),
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: _textColor,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF3B82F6).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '$fontSize',
-                              style: TextStyle(
-                                color: const Color(0xFF3B82F6),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Slider with preview
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: _textColor.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              'A',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: _textColor.withOpacity(0.7),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 3,
-                            child: Theme(
-                              data: Theme.of(context).copyWith(
-                                sliderTheme: SliderThemeData(
-                                  activeTrackColor: const Color(0xFF3B82F6),
-                                  inactiveTrackColor: _textColor.withOpacity(
-                                    0.15,
-                                  ),
-                                  thumbColor: const Color(0xFF3B82F6),
-                                  overlayColor: const Color(
-                                    0xFF3B82F6,
-                                  ).withOpacity(0.1),
-                                  trackHeight: 4,
-                                  thumbShape: const RoundSliderThumbShape(
-                                    enabledThumbRadius: 10,
-                                  ),
-                                  overlayShape: const RoundSliderOverlayShape(
-                                    overlayRadius: 18,
-                                  ),
-                                  showValueIndicator:
-                                      ShowValueIndicator.onlyForDiscrete,
-                                ),
-                              ),
-                              child: Slider(
-                                value: fontSize.toDouble(),
-                                min: 16,
-                                max: 40,
-                                divisions: 12,
-                                label: '$fontSize',
-                                onChanged: (v) =>
-                                    updateTypography(font: v.round()),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            width: 40,
-                            height: 40,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: _textColor.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              'A',
-                              style: TextStyle(
-                                fontSize: 26,
-                                color: _textColor.withOpacity(0.7),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              // Quick settings cards in 2-column grid
-              Row(
-                children: [
-                  Expanded(
-                    child: _modernSegmentCard(
-                      label: _text(zh: '边距', en: 'Margin'),
-                      labels: paddingLabels,
-                      selectedIndex: _paddingPreset,
-                      onSelect: (index) => updateTypography(padding: index),
-                      icon: Icons.format_indent_increase_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _modernSegmentCard(
-                      label: _text(zh: '行距', en: 'Line Height'),
-                      labels: lineHeightLabels,
-                      selectedIndex: lineHeightDisplayIndex,
-                      onSelect: (index) {
-                        final mapped = index == 0
-                            ? 1
-                            : index == 1
-                            ? 2
-                            : 3;
-                        updateTypography(lineHeight: mapped);
-                      },
-                      icon: Icons.format_line_spacing_rounded,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // Additional settings row
-              Row(
-                children: [
-                  Expanded(
-                    child: _modernSettingCard(
-                      title: _text(zh: '字体样式', en: 'Font Style'),
-                      subtitle: _text(
-                        zh: '默认',
-                        en: 'Default',
-                      ), // TODO: Get current font style
-                      icon: Icons.text_fields_rounded,
-                      onTap: () async {
-                        await _showFontStyleAndLayoutPanel();
-                        if (mounted) {
-                          setModalState(() {});
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _modernSettingCard(
-                      title: _text(zh: '首行设置', en: 'First Line'),
-                      subtitle: _paragraphIndentEnabled
-                          ? _text(zh: '缩进', en: 'Indent')
-                          : _text(zh: '顶格', en: 'Flush Left'),
-                      icon: Icons.format_align_left_rounded,
-                      onTap: () async {
-                        await _showParagraphIndentPanel();
-                        if (mounted) {
-                          setModalState(() {});
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              // Action buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: _modernActionButton(
-                      label: _text(zh: '恢复默认', en: 'Reset'),
-                      isSecondary: false,
-                      onTap: () {
-                        setState(() {
-                          _fontSizePreset = 20;
-                          _paddingPreset = 1;
-                          _lineHeightPreset = 2;
-                          _textAlignPreset = 0;
-                          _paragraphIndentEnabled = true;
-                          _fontStylePreset = 0;
-                        });
-                        setModalState(() {});
-                        _scheduleSaveReaderPreferences();
-                        _scheduleRepaginate();
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _modernActionButton(
-                      label: _text(zh: '完成', en: 'Done'),
-                      isSecondary: true,
-                      onTap: () => Navigator.of(context).pop(),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _modernSegmentCard({
-    required String label,
-    required List<String> labels,
-    required int selectedIndex,
-    required ValueChanged<int> onSelect,
-    required IconData icon,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _readerBgColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: _textColor.withOpacity(0.6)),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _textColor.withOpacity(0.8),
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(labels.length, (index) {
-              final isSelected = index == selectedIndex;
-              return GestureDetector(
-                onTap: () => onSelect(index),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFF3B82F6)
-                        : _textColor.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF3B82F6).withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Text(
-                    labels[index],
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      color: isSelected
-                          ? Colors.white
-                          : _textColor.withOpacity(0.7),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _modernSettingCard({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: _readerBgColor,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 15,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _textColor.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, size: 20, color: _textColor.withOpacity(0.7)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _textColor,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
-                        color: _textColor.withOpacity(0.6),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 22,
-                color: _textColor.withOpacity(0.4),
-              ),
-            ],
           ),
         ),
       ),
@@ -3002,7 +3088,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          height: 52,
+          height: 48,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: isSecondary
@@ -3054,115 +3140,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Future<void> _showFontStyleAndLayoutPanel() async {
-    final styleOptions = [
-      _text(zh: '默认', en: 'Default'),
-      _text(zh: '衬线', en: 'Serif'),
-      _text(zh: '等宽', en: 'Mono'),
-    ];
-    final alignOptions = [
-      _text(zh: '自动', en: 'Auto'),
-      _text(zh: '两端', en: 'Justify'),
-      _text(zh: '左对齐', en: 'Left'),
-      _text(zh: '居中', en: 'Center'),
-    ];
-    var draftStyle = _fontStylePreset;
-    var draftAlign = _textAlignPreset;
-
-    await _showReaderActionPanel(
-      title: _text(zh: '字体样式', en: 'Font Style'),
-      child: StatefulBuilder(
-        builder: (context, setModalState) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 8),
-              _panelSubTitle(_text(zh: '字体', en: 'Font')),
-              const SizedBox(height: 8),
-              _segmentedChoices(
-                labels: styleOptions,
-                selectedIndex: draftStyle,
-                onSelect: (index) {
-                  draftStyle = index.clamp(0, 2);
-                  setModalState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _panelSubTitle(_text(zh: '布局方式', en: 'Layout')),
-              const SizedBox(height: 8),
-              _segmentedChoices(
-                labels: alignOptions,
-                selectedIndex: draftAlign,
-                onSelect: (index) {
-                  draftAlign = index.clamp(0, 3);
-                  setModalState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _actionPill(
-                _text(zh: '应用', en: 'Apply'),
-                textColor: _textColor,
-                bgColor: _textColor.withOpacity(0.08),
-                onTap: () {
-                  setState(() {
-                    _fontStylePreset = draftStyle;
-                    _textAlignPreset = draftAlign;
-                  });
-                  _scheduleSaveReaderPreferences();
-                  _scheduleRepaginate();
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _showParagraphIndentPanel() async {
-    final options = [
-      _text(zh: '首行缩进', en: 'First-line indent'),
-      _text(zh: '首行顶格', en: 'Flush left'),
-    ];
-    var draft = _paragraphIndentEnabled ? 0 : 1;
-
-    await _showReaderActionPanel(
-      title: _text(zh: '首行设置', en: 'First Line'),
-      child: StatefulBuilder(
-        builder: (context, setModalState) {
-          return Column(
-            children: [
-              const SizedBox(height: 8),
-              _segmentedChoices(
-                labels: options,
-                selectedIndex: draft,
-                onSelect: (index) {
-                  draft = index.clamp(0, 1);
-                  setModalState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _actionPill(
-                _text(zh: '应用', en: 'Apply'),
-                textColor: _textColor,
-                bgColor: _textColor.withOpacity(0.08),
-                onTap: () {
-                  setState(() {
-                    _paragraphIndentEnabled = draft == 0;
-                  });
-                  _scheduleSaveReaderPreferences();
-                  _scheduleRepaginate();
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
-          );
-        },
       ),
     );
   }
@@ -5275,8 +5252,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _isDarkReaderBackground ? _textColor : const Color(0xFF182118);
 
   Color get _readerSecondaryInfoColor => _isDarkReaderBackground
-      ? Colors.white.withOpacity(0.82)
-      : _textColor.withOpacity(0.55);
+      ? _textColor.withOpacity(0.72)
+      : _textColor.withOpacity(0.48);
 
   double get _chapterOverlayFontSize =>
       (_contentFontSize * 0.66).clamp(11.0, 15.0);
