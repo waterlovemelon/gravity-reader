@@ -1619,54 +1619,63 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             child: SafeArea(
               top: false,
               minimum: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _toolButton(
-                    icon: CupertinoIcons.list_bullet,
-                    active: _activePanel == _ReaderPanel.toc,
-                    onTap: () => _openPanel(_ReaderPanel.toc, () async {
-                      await _showTableOfContents(book);
-                    }),
-                  ),
-                  _toolButton(
-                    icon: CupertinoIcons.square_pencil,
-                    active: _activePanel == _ReaderPanel.notes,
-                    onTap: () => _openPanel(_ReaderPanel.notes, () async {
-                      await _showReaderActionPanel(
-                        title: _text(zh: '笔记', en: 'Notes'),
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 6),
-                          child: Text(
-                            _text(
-                              zh: '暂无笔记，长按正文即可添加。',
-                              en: 'No notes yet. Long press the text to add one.',
+                  _buildChapterNavigationBar(book),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _toolButton(
+                        icon: CupertinoIcons.list_bullet,
+                        active: _activePanel == _ReaderPanel.toc,
+                        onTap: () => _openPanel(_ReaderPanel.toc, () async {
+                          await _showTableOfContents(book);
+                        }),
+                      ),
+                      _toolButton(
+                        icon: CupertinoIcons.square_pencil,
+                        active: _activePanel == _ReaderPanel.notes,
+                        onTap: () => _openPanel(_ReaderPanel.notes, () async {
+                          await _showReaderActionPanel(
+                            title: _text(zh: '笔记', en: 'Notes'),
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: Text(
+                                _text(
+                                  zh: '暂无笔记，长按正文即可添加。',
+                                  en: 'No notes yet. Long press the text to add one.',
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                  _toolButton(
-                    icon: CupertinoIcons.circle,
-                    active: _activePanel == _ReaderPanel.progress,
-                    onTap: () => _openPanel(_ReaderPanel.progress, () async {
-                      await _showProgressPanel(book, totalPages);
-                    }),
-                  ),
-                  _toolButton(
-                    icon: _isDarkReaderBackground
-                        ? CupertinoIcons.moon_fill
-                        : CupertinoIcons.sun_max_fill,
-                    active: true,
-                    onTap: _toggleQuickBrightnessTheme,
-                  ),
-                  _toolButton(
-                    icon: CupertinoIcons.slider_horizontal_3,
-                    active: _activePanel == _ReaderPanel.typography,
-                    onTap: () => _openPanel(_ReaderPanel.typography, () async {
-                      await _showSettingsPanel();
-                    }),
+                          );
+                        }),
+                      ),
+                      _toolButton(
+                        icon: CupertinoIcons.circle,
+                        active: _activePanel == _ReaderPanel.progress,
+                        onTap: () =>
+                            _openPanel(_ReaderPanel.progress, () async {
+                              await _showProgressPanel(book, totalPages);
+                            }),
+                      ),
+                      _toolButton(
+                        icon: _isDarkReaderBackground
+                            ? CupertinoIcons.moon_fill
+                            : CupertinoIcons.sun_max_fill,
+                        active: true,
+                        onTap: _toggleQuickBrightnessTheme,
+                      ),
+                      _toolButton(
+                        icon: CupertinoIcons.slider_horizontal_3,
+                        active: _activePanel == _ReaderPanel.typography,
+                        onTap: () =>
+                            _openPanel(_ReaderPanel.typography, () async {
+                              await _showSettingsPanel();
+                            }),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1675,6 +1684,84 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ),
       ),
     );
+  }
+
+  Widget _buildChapterNavigationBar(Book book) {
+    final entries = _buildTocEntries(book);
+    final currentIndex = _currentChapterNavigationIndex(book, entries);
+    final previousEntry = currentIndex > 0 ? entries[currentIndex - 1] : null;
+    final nextEntry = currentIndex >= 0 && currentIndex + 1 < entries.length
+        ? entries[currentIndex + 1]
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 2, 2, 6),
+      child: Row(
+        children: [
+          _buildChapterNavButton(
+            label: _text(zh: '上一章', en: 'Previous'),
+            enabled: previousEntry != null,
+            onTap: previousEntry == null
+                ? null
+                : () => _jumpToNavigationEntry(book, previousEntry),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildThemedSlider(
+              value: _currentProgressPercent.clamp(0.0, 1.0),
+              min: 0,
+              max: 1,
+              onChanged: (value) {
+                if (_isTxtBook(book)) {
+                  _jumpToTxtProgress(value);
+                  return;
+                }
+                final maxPage = max(0, _resolveTotalPages(book) - 1);
+                _jumpToPage((value * maxPage).round().clamp(0, maxPage));
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          _buildChapterNavButton(
+            label: _text(zh: '下一章', en: 'Next'),
+            enabled: nextEntry != null,
+            onTap: nextEntry == null
+                ? null
+                : () => _jumpToNavigationEntry(book, nextEntry),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChapterNavButton({
+    required String label,
+    required bool enabled,
+    required VoidCallback? onTap,
+  }) {
+    final foregroundColor = enabled
+        ? _textColor
+        : _textColor.withOpacity(_isDarkReaderBackground ? 0.32 : 0.38);
+
+    return TextButton(
+      style: TextButton.styleFrom(
+        foregroundColor: foregroundColor,
+        minimumSize: const Size(56, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: onTap,
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  double _floatingBottomControlOffset(Book book) {
+    const toolbarBaseHeight = 78.0;
+    const chapterNavigationExtraHeight = 46.0;
+    return toolbarBaseHeight + chapterNavigationExtraHeight;
   }
 
   Widget _toolButton({
@@ -3644,6 +3731,37 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return _txtChapters[currentPos - 1].index;
   }
 
+  int _currentChapterNavigationIndex(Book book, List<_TocEntry> entries) {
+    if (entries.isEmpty) {
+      return -1;
+    }
+    if (_isTxtBook(book)) {
+      final currentChapterIndex = _currentTxtLocation?.chapterIndex;
+      if (currentChapterIndex != null) {
+        final txtIndex = entries.indexWhere(
+          (entry) => entry.chapterIndex == currentChapterIndex,
+        );
+        if (txtIndex >= 0) {
+          return txtIndex;
+        }
+      }
+    }
+
+    final pageIndex = entries.lastIndexWhere(
+      (entry) => entry.pageIndex <= _currentPage,
+    );
+    return pageIndex >= 0 ? pageIndex : 0;
+  }
+
+  void _jumpToNavigationEntry(Book book, _TocEntry entry) {
+    if (_isTxtBook(book) && entry.chapterIndex != null) {
+      _jumpToTxtChapter(entry.chapterIndex!);
+      _scheduleSaveTxtProgress(book);
+      return;
+    }
+    _jumpToPage(entry.pageIndex);
+  }
+
   void _jumpToTxtLocation(int chapterIndex, int offset) {
     if (_txtChapters.isEmpty || _txtChapterByIndex.isEmpty) {
       return;
@@ -5333,6 +5451,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final ttsState = ref.watch(ttsProvider);
     const buttonSize = 54.0;
     final viewPadding = MediaQuery.of(context).viewPadding;
+    final bottomOffset = _floatingBottomControlOffset(book);
 
     final buttonBgColor = _controlSurfaceColor;
 
@@ -5352,7 +5471,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     return Positioned(
       right: 16,
-      bottom: viewPadding.bottom + 78,
+      bottom: viewPadding.bottom + bottomOffset,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
@@ -5432,9 +5551,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     final mediaSize = MediaQuery.of(context).size;
     final viewPadding = MediaQuery.of(context).viewPadding;
+    final bottomOffset = _floatingBottomControlOffset(book);
     final defaultOffset = Offset(
       16,
-      mediaSize.height - viewPadding.bottom - 78 - capsuleHeight,
+      mediaSize.height - viewPadding.bottom - bottomOffset - capsuleHeight,
     );
     final resolvedOffset = _clampFloatingPlaybackOffset(
       _floatingPlaybackOffset ?? defaultOffset,
