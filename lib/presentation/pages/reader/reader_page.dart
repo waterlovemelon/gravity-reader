@@ -162,7 +162,7 @@ class _ThemeOption {
 
 enum _ReaderPanel { none, toc, notes, progress, typography }
 
-enum _SettingsPanelPage { root, fontStyle, layout, customBackground }
+enum _SettingsPanelPage { root, fontStyle, layout, customBackground, more }
 
 enum _ReaderBackgroundMode { preset, customImage }
 
@@ -434,6 +434,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       'reader_background_blur_sigma_v1';
   static const String _prefBackgroundBrightness =
       'reader_background_brightness_v1';
+  static const String _prefOneHandMode = 'reader_one_hand_mode_v1';
+  static const String _prefEdgeSwipeExit = 'reader_edge_swipe_exit_v1';
   // 禁用 keepPage 以避免 page storage 延迟
   late PageController _pageController;
   final int _fallbackPages = 100;
@@ -485,6 +487,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   int _textAlignPreset = 0;
   bool _paragraphIndentEnabled = true;
   int _fontStylePreset = 0;
+  bool _oneHandModeEnabled = false;
+  bool _edgeSwipeExitEnabled = false;
   bool _isFloatingCoverSpinning = false;
   Offset? _floatingPlaybackOffset;
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
@@ -610,6 +614,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     final backgroundBlurSigma = prefs.getDouble(_prefBackgroundBlurSigma);
     var backgroundBrightness = prefs.getDouble(_prefBackgroundBrightness);
+    final oneHandModeEnabled = prefs.getBool(_prefOneHandMode);
+    final edgeSwipeExitEnabled = prefs.getBool(_prefEdgeSwipeExit);
     var resolvedBackgroundMode = _readerBackgroundModeFromValue(
       backgroundModeValue,
     );
@@ -682,6 +688,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _backgroundBlurSigma = backgroundBlurSigma.clamp(0.0, 12.0);
       }
       _customBackgroundBrightness = backgroundBrightness;
+      if (oneHandModeEnabled != null) {
+        _oneHandModeEnabled = oneHandModeEnabled;
+      }
+      if (edgeSwipeExitEnabled != null) {
+        _edgeSwipeExitEnabled = edgeSwipeExitEnabled;
+      }
     });
     if (resolvedBackgroundMode == _ReaderBackgroundMode.preset &&
         backgroundImagePath != null &&
@@ -738,6 +750,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           _backgroundOverlayOpacity,
         );
         await prefs.setDouble(_prefBackgroundBlurSigma, _backgroundBlurSigma);
+        await prefs.setBool(_prefOneHandMode, _oneHandModeEnabled);
+        await prefs.setBool(_prefEdgeSwipeExit, _edgeSwipeExitEnabled);
         if (_customBackgroundBrightness != null) {
           await prefs.setDouble(
             _prefBackgroundBrightness,
@@ -1214,6 +1228,31 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             ],
           ),
         ), // GestureDetector 闭合
+        if (_edgeSwipeExitEnabled)
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 20,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragUpdate: (details) async {
+                if (details.primaryDelta == null ||
+                    details.primaryDelta! <= 14) {
+                  return;
+                }
+                if (!Navigator.of(context).canPop()) {
+                  return;
+                }
+                final bookAsync = ref.read(bookByIdProvider(widget.bookId));
+                final currentBook = bookAsync.valueOrNull ?? widget.initialBook;
+                await _persistCurrentBookProgress(currentBook);
+                if (mounted) {
+                  Navigator.of(context).maybePop();
+                }
+              },
+            ),
+          ),
       ], // 最外层 Stack children 闭合
     ); // 最外层 Stack 闭合
 
@@ -2281,6 +2320,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                             onTap: () => navigateTo(
                                               _SettingsPanelPage.layout,
                                             ),
+                                          ),
+                                          _buildCompactSettingRow(
+                                            title: _text(
+                                              zh: '更多设置',
+                                              en: 'More Settings',
+                                            ),
+                                            subtitle:
+                                                '${_oneHandModeEnabled ? _text(zh: '单手模式开', en: 'One-hand on') : _text(zh: '单手模式关', en: 'One-hand off')} / ${_edgeSwipeExitEnabled ? _text(zh: '右滑退出开', en: 'Edge swipe on') : _text(zh: '右滑退出关', en: 'Edge swipe off')}',
+                                            emphasis: false,
+                                            onTap: () => navigateTo(
+                                              _SettingsPanelPage.more,
+                                            ),
                                             isLast: true,
                                           ),
                                         ],
@@ -2641,6 +2692,66 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                   ],
                                 ),
                               ),
+                              _SettingsPanelPage.more => buildPanelScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildInlineSubpageHeader(
+                                      title: _text(
+                                        zh: '更多设置',
+                                        en: 'More Settings',
+                                      ),
+                                      onBack: () =>
+                                          navigateTo(_SettingsPanelPage.root),
+                                    ),
+                                    _buildSettingsSection(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildSwitchSettingRow(
+                                            title: _text(
+                                              zh: '单手模式',
+                                              en: 'One-hand Mode',
+                                            ),
+                                            subtitle: _text(
+                                              zh: '点击正文界面的左侧和右侧都向后翻页',
+                                              en: 'Tapping both the left and right side turns to the next page',
+                                            ),
+                                            value: _oneHandModeEnabled,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _oneHandModeEnabled = value;
+                                              });
+                                              _scheduleSaveReaderPreferences();
+                                              setModalState(() {});
+                                            },
+                                          ),
+                                          _buildSwitchSettingRow(
+                                            title: _text(
+                                              zh: '右滑退出',
+                                              en: 'Edge Swipe Exit',
+                                            ),
+                                            subtitle: _text(
+                                              zh: '从屏幕左边缘向右滑动退出阅读',
+                                              en: 'Swipe right from the left screen edge to exit reading',
+                                            ),
+                                            value: _edgeSwipeExitEnabled,
+                                            onChanged: (value) {
+                                              setState(() {
+                                                _edgeSwipeExitEnabled = value;
+                                              });
+                                              _scheduleSaveReaderPreferences();
+                                              setModalState(() {});
+                                            },
+                                            isLast: true,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             },
                           ),
                         ),
@@ -2872,6 +2983,65 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchSettingRow({
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    bool isLast = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: isLast
+            ? null
+            : Border(bottom: BorderSide(color: _textColor.withOpacity(0.08))),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: _textColor,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: _textColor.withOpacity(0.58),
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (_isIOS)
+            CupertinoSwitch(
+              value: value,
+              onChanged: onChanged,
+              activeTrackColor: const Color(0xFF3B82F6),
+            )
+          else
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              activeThumbColor: const Color(0xFF3B82F6),
+            ),
+        ],
       ),
     );
   }
@@ -3433,12 +3603,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final dx = details.localPosition.dx;
 
     if (dx < width * 0.3) {
+      final shouldForward = _oneHandModeEnabled;
       if (_txtPages.isNotEmpty && _currentTxtLocation != null) {
-        _turnTxtPage(forward: false, book: null);
+        _turnTxtPage(forward: shouldForward, book: null);
         _lastPageTurnStart = tapStart;
         return;
       }
-      _turnPage(forward: false, totalPages: totalPages, tapStart: tapStart);
+      _turnPage(
+        forward: shouldForward,
+        totalPages: totalPages,
+        tapStart: tapStart,
+      );
       _lastPageTurnStart = tapStart;
       return;
     }
