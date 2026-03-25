@@ -27,11 +27,11 @@ class ThemePreferencesService {
       final themeId = _prefs.getString(_keySelectedThemeId);
 
       // 如果没有保存过，返回默认主题ID
-      return themeId ?? ThemeConstants.themeIdGreenFresh;
+      return themeId ?? ThemeConstants.themeIdBlue;
     } catch (e) {
       print('Error loading theme preference: $e');
       // 出错时返回默认主题ID
-      return ThemeConstants.themeIdGreenFresh;
+      return ThemeConstants.themeIdBlue;
     }
   }
 

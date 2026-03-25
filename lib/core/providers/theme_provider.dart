@@ -83,9 +83,9 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
 
   ThemeNotifier(this._preferencesService)
     : super(
-        const ThemeState(
+        ThemeState(
           currentTheme: ThemeConstants.defaultTheme,
-          themeId: ThemeConstants.themeIdGreenFresh,
+          themeId: ThemeConstants.themeIdBlue,
           themeMode: AppThemeMode.system,
         ),
       ) {
@@ -109,9 +109,9 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     } catch (e) {
       print('Error loading theme: $e');
       // 出错时使用默认主题
-      state = const ThemeState(
+      state = ThemeState(
         currentTheme: ThemeConstants.defaultTheme,
-        themeId: ThemeConstants.themeIdGreenFresh,
+        themeId: ThemeConstants.themeIdBlue,
         themeMode: AppThemeMode.system,
       );
     }
