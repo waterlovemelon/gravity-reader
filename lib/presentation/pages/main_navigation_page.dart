@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/constants/theme_constants.dart';
 import 'package:myreader/core/models/app_theme_data.dart';
 import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
@@ -546,6 +547,7 @@ class _ThemeModeSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentMode = ref.watch(appThemeModeProvider);
+    final currentThemeId = ref.watch(currentThemeIdProvider);
 
     return _ProfileCard(
       theme: theme,
@@ -612,6 +614,50 @@ class _ThemeModeSection extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Icon(Icons.color_lens_outlined, color: theme.primaryColor),
+              const SizedBox(width: 8),
+              Text(
+                LocaleText.of(context, zh: '主题色', en: 'Theme Color'),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            LocaleText.of(
+              context,
+              zh: '仅影响应用界面，不影响阅读正文配色',
+              en: 'Affects the app shell only, not the reading page colors',
+            ),
+            style: TextStyle(fontSize: 13, color: theme.secondaryTextColor),
+          ),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ThemeConstants.allThemes
+                  .map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: _ThemeColorChip(
+                        appTheme: item,
+                        selected: currentThemeId == item.id,
+                        onTap: () => ref
+                            .read(themeProvider.notifier)
+                            .switchTheme(item.id),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
         ],
       ),
     );
@@ -656,6 +702,59 @@ class _ThemeModeChip extends StatelessWidget {
               fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               color: selected ? theme.primaryColor : theme.textColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeColorChip extends StatelessWidget {
+  final AppThemeData appTheme;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ThemeColorChip({
+    required this.appTheme,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? appTheme.primaryDarkColor
+                      : Colors.transparent,
+                  width: selected ? 2.5 : 0,
+                ),
+              ),
+              child: Center(
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: appTheme.primaryColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
