@@ -1,7 +1,9 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:myreader/core/providers/theme_provider.dart';
 
-class FloatingNavBar extends StatelessWidget {
+class FloatingNavBar extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onIndexChanged;
 
@@ -12,7 +14,21 @@ class FloatingNavBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
+    final navBackground =
+        Color.lerp(
+          theme.cardBackgroundColor,
+          theme.scaffoldBackgroundColor,
+          0.2,
+        ) ??
+        theme.cardBackgroundColor;
+    final navBorder =
+        Color.lerp(theme.dividerColor, Colors.white, 0.3) ?? theme.dividerColor;
+    final selectedBackground = theme.primaryColor.withValues(alpha: 0.12);
+    final selectedForeground = theme.primaryColor;
+    final unselectedForeground = theme.secondaryTextColor;
+
     return Positioned(
       left: 20,
       right: 20,
@@ -20,12 +36,15 @@ class FloatingNavBar extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFF7F7F7),
+          color: navBackground,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: Colors.white.withOpacity(0.8), width: 1),
+          border: Border.all(
+            color: navBorder.withValues(alpha: 0.72),
+            width: 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 20,
               offset: const Offset(0, 4),
             ),
@@ -38,24 +57,36 @@ class FloatingNavBar extends StatelessWidget {
               selectedIcon: Icons.auto_stories_rounded,
               label: '阅读',
               index: 0,
+              selectedBackground: selectedBackground,
+              selectedForeground: selectedForeground,
+              unselectedForeground: unselectedForeground,
             ),
             _buildNavItem(
               icon: Icons.collections_bookmark_outlined,
               selectedIcon: Icons.collections_bookmark_rounded,
               label: '书架',
               index: 1,
+              selectedBackground: selectedBackground,
+              selectedForeground: selectedForeground,
+              unselectedForeground: unselectedForeground,
             ),
             _buildNavItem(
               icon: Icons.people_outline_rounded,
               selectedIcon: Icons.people_rounded,
               label: '书友',
               index: 2,
+              selectedBackground: selectedBackground,
+              selectedForeground: selectedForeground,
+              unselectedForeground: unselectedForeground,
             ),
             _buildNavItem(
               icon: Icons.sentiment_satisfied_alt_outlined,
               selectedIcon: Icons.sentiment_satisfied_alt_rounded,
               label: '我的',
               index: 3,
+              selectedBackground: selectedBackground,
+              selectedForeground: selectedForeground,
+              unselectedForeground: unselectedForeground,
             ),
           ],
         ),
@@ -68,6 +99,9 @@ class FloatingNavBar extends StatelessWidget {
     required IconData selectedIcon,
     required String label,
     required int index,
+    required Color selectedBackground,
+    required Color selectedForeground,
+    required Color unselectedForeground,
   }) {
     final isSelected = currentIndex == index;
 
@@ -83,9 +117,7 @@ class FloatingNavBar extends StatelessWidget {
             vertical: 12,
           ),
           decoration: BoxDecoration(
-            color: isSelected
-                ? Colors.black.withOpacity(0.06)
-                : Colors.transparent,
+            color: isSelected ? selectedBackground : Colors.transparent,
             borderRadius: BorderRadius.circular(22),
           ),
           child: Row(
@@ -94,9 +126,7 @@ class FloatingNavBar extends StatelessWidget {
               Icon(
                 isSelected ? selectedIcon : icon,
                 size: 22,
-                color: isSelected
-                    ? const Color(0xFF007AFF)
-                    : const Color(0xFF8E8E93),
+                color: isSelected ? selectedForeground : unselectedForeground,
               ),
               AnimatedCrossFade(
                 duration: const Duration(milliseconds: 200),
@@ -109,8 +139,8 @@ class FloatingNavBar extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 6),
                   child: Text(
                     label,
-                    style: const TextStyle(
-                      color: Color(0xFF007AFF),
+                    style: TextStyle(
+                      color: selectedForeground,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       decoration: TextDecoration.none,

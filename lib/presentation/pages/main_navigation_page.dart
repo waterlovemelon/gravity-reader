@@ -58,6 +58,7 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(currentThemeProvider);
     final isLoadingAudio =
         ttsState.isLoadingAudio && !ttsState.isSpeaking && !ttsState.isPaused;
     final shouldShow =
@@ -72,6 +73,16 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
     final displayBook = latestBook ?? book;
     final isPlaying = ttsState.isSpeaking && !ttsState.isPaused;
     final canTapPlayback = !isLoadingAudio || ttsState.isPaused;
+    final capsuleColor =
+        Color.lerp(theme.primaryColor, theme.cardBackgroundColor, 0.55) ??
+        theme.cardBackgroundColor;
+    final primaryIconColor = theme.textColor;
+    final secondaryIconColor = theme.secondaryTextColor;
+    final ringFill =
+        Color.lerp(theme.primaryColor, Colors.white, 0.72) ??
+        theme.primaryColor;
+    final ringBorder =
+        Color.lerp(theme.primaryColor, Colors.white, 0.5) ?? theme.primaryColor;
 
     return Positioned(
       left: 16,
@@ -83,12 +94,14 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
           width: 164,
           height: 59,
           decoration: BoxDecoration(
-            color: const Color(0xFFA8C1AC).withOpacity(0.96),
+            color: capsuleColor.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(29.5),
-            border: Border.all(color: Colors.white.withOpacity(0.24)),
+            border: Border.all(
+              color: theme.dividerColor.withValues(alpha: 0.44),
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.12),
+                color: Colors.black.withValues(alpha: 0.12),
                 blurRadius: 14,
                 offset: const Offset(0, 7),
               ),
@@ -113,8 +126,10 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                   height: 49,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.26),
-                    border: Border.all(color: Colors.white.withOpacity(0.44)),
+                    color: ringFill.withValues(alpha: 0.24),
+                    border: Border.all(
+                      color: ringBorder.withValues(alpha: 0.5),
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(3),
@@ -151,7 +166,7 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                               ? Icons.pause_rounded
                               : Icons.play_arrow_rounded,
                           size: 22,
-                          color: const Color(0xFFF6FBF7),
+                          color: primaryIconColor,
                         ),
                         if (isLoadingAudio)
                           Positioned.fill(
@@ -160,12 +175,11 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                                 padding: const EdgeInsets.all(2),
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2.2,
-                                  valueColor:
-                                      const AlwaysStoppedAnimation<Color>(
-                                        Color(0xFFF6FBF7),
-                                      ),
-                                  backgroundColor: Colors.white.withOpacity(
-                                    0.14,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    primaryIconColor,
+                                  ),
+                                  backgroundColor: primaryIconColor.withValues(
+                                    alpha: 0.14,
                                   ),
                                 ),
                               ),
@@ -185,13 +199,13 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                   onTap: () async {
                     await ref.read(ttsProvider.notifier).stop();
                   },
-                  child: const SizedBox(
+                  child: SizedBox(
                     width: 34,
                     height: 34,
                     child: Icon(
                       Icons.close_rounded,
                       size: 22,
-                      color: Colors.white70,
+                      color: secondaryIconColor,
                     ),
                   ),
                 ),
