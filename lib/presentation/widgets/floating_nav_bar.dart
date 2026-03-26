@@ -1,4 +1,5 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
@@ -16,79 +17,125 @@ class FloatingNavBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = ref.watch(currentThemeProvider);
+    final brightness = Theme.of(context).brightness;
+    final isDark = brightness == Brightness.dark;
     final navBackground =
         Color.lerp(
           theme.cardBackgroundColor,
           theme.scaffoldBackgroundColor,
-          0.2,
+          isDark ? 0.08 : 0.14,
         ) ??
         theme.cardBackgroundColor;
-    final navBorder =
-        Color.lerp(theme.dividerColor, Colors.white, 0.3) ?? theme.dividerColor;
     final selectedBackground = theme.primaryColor.withValues(alpha: 0.12);
     final selectedForeground = theme.primaryColor;
     final unselectedForeground = theme.secondaryTextColor;
+    final navDecoration = BoxDecoration(
+      color: isDark
+          ? navBackground.withValues(alpha: 0.74)
+          : navBackground.withValues(alpha: 0.78),
+      gradient: isDark
+          ? null
+          : LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color.lerp(navBackground, Colors.white, 0.18) ?? navBackground,
+                navBackground,
+              ],
+            ),
+      borderRadius: BorderRadius.circular(28),
+      border: isDark
+          ? Border.all(
+              color: theme.dividerColor.withValues(alpha: 0.18),
+              width: 0.8,
+            )
+          : Border.all(
+              color:
+                  Color.lerp(
+                    theme.dividerColor,
+                    Colors.white,
+                    0.32,
+                  )?.withValues(alpha: 0.42) ??
+                  theme.dividerColor.withValues(alpha: 0.42),
+              width: 0.9,
+            ),
+      boxShadow: isDark
+          ? [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ]
+          : [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.045),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: Colors.white.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, -1),
+              ),
+            ],
+    );
 
     return Positioned(
       left: 20,
       right: 20,
       bottom: 24,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          color: navBackground,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: navBorder.withValues(alpha: 0.72),
-            width: 1,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: isDark ? 12 : 16,
+            sigmaY: isDark ? 12 : 16,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: navDecoration,
+            child: Row(
+              children: [
+                _buildNavItem(
+                  icon: Icons.auto_stories_outlined,
+                  selectedIcon: Icons.auto_stories_rounded,
+                  label: '阅读',
+                  index: 0,
+                  selectedBackground: selectedBackground,
+                  selectedForeground: selectedForeground,
+                  unselectedForeground: unselectedForeground,
+                ),
+                _buildNavItem(
+                  icon: Icons.collections_bookmark_outlined,
+                  selectedIcon: Icons.collections_bookmark_rounded,
+                  label: '书架',
+                  index: 1,
+                  selectedBackground: selectedBackground,
+                  selectedForeground: selectedForeground,
+                  unselectedForeground: unselectedForeground,
+                ),
+                _buildNavItem(
+                  icon: Icons.people_outline_rounded,
+                  selectedIcon: Icons.people_rounded,
+                  label: '书友',
+                  index: 2,
+                  selectedBackground: selectedBackground,
+                  selectedForeground: selectedForeground,
+                  unselectedForeground: unselectedForeground,
+                ),
+                _buildNavItem(
+                  icon: Icons.sentiment_satisfied_alt_outlined,
+                  selectedIcon: Icons.sentiment_satisfied_alt_rounded,
+                  label: '我的',
+                  index: 3,
+                  selectedBackground: selectedBackground,
+                  selectedForeground: selectedForeground,
+                  unselectedForeground: unselectedForeground,
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            _buildNavItem(
-              icon: Icons.auto_stories_outlined,
-              selectedIcon: Icons.auto_stories_rounded,
-              label: '阅读',
-              index: 0,
-              selectedBackground: selectedBackground,
-              selectedForeground: selectedForeground,
-              unselectedForeground: unselectedForeground,
-            ),
-            _buildNavItem(
-              icon: Icons.collections_bookmark_outlined,
-              selectedIcon: Icons.collections_bookmark_rounded,
-              label: '书架',
-              index: 1,
-              selectedBackground: selectedBackground,
-              selectedForeground: selectedForeground,
-              unselectedForeground: unselectedForeground,
-            ),
-            _buildNavItem(
-              icon: Icons.people_outline_rounded,
-              selectedIcon: Icons.people_rounded,
-              label: '书友',
-              index: 2,
-              selectedBackground: selectedBackground,
-              selectedForeground: selectedForeground,
-              unselectedForeground: unselectedForeground,
-            ),
-            _buildNavItem(
-              icon: Icons.sentiment_satisfied_alt_outlined,
-              selectedIcon: Icons.sentiment_satisfied_alt_rounded,
-              label: '我的',
-              index: 3,
-              selectedBackground: selectedBackground,
-              selectedForeground: selectedForeground,
-              unselectedForeground: unselectedForeground,
-            ),
-          ],
+          ),
         ),
       ),
     );
