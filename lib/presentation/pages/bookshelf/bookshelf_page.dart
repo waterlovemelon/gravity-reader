@@ -1565,9 +1565,8 @@ class _CurrentlyReadingCard extends StatelessWidget {
     final cardHighlight = Color.lerp(
       theme.cardBackgroundColor,
       warmAccent,
-      0.3,
+      0.24,
     )!;
-    final borderColor = Color.lerp(theme.dividerColor, warmAccent, 0.36)!;
     final badgeBackground = warmAccent.withValues(alpha: 0.16);
     final badgeTextColor = Color.lerp(theme.textColor, warmAccent, 0.5)!;
 
@@ -1582,16 +1581,24 @@ class _CurrentlyReadingCard extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [cardHighlight, cardBase, theme.cardBackgroundColor],
-              stops: const [0, 0.45, 1],
+              colors: [
+                Color.lerp(cardHighlight, Colors.white, 0.14) ?? cardHighlight,
+                cardBase,
+                theme.cardBackgroundColor,
+              ],
+              stops: const [0, 0.38, 1],
             ),
             borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: borderColor.withValues(alpha: 0.9)),
             boxShadow: [
               BoxShadow(
-                color: theme.textColor.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
+                color: Colors.black.withValues(alpha: 0.035),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+              BoxShadow(
+                color: Colors.white.withValues(alpha: 0.12),
+                blurRadius: 7,
+                offset: const Offset(0, -1),
               ),
             ],
           ),
