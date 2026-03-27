@@ -358,8 +358,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       context: context,
       barrierLabel: _text(zh: '书籍菜单', en: 'Book menu'),
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.08),
-      transitionDuration: const Duration(milliseconds: 220),
+      barrierColor: Colors.black.withValues(alpha: 0.14),
+      transitionDuration: const Duration(milliseconds: 190),
       pageBuilder: (_, __, ___) => _BookContextMenuPopup(
         book: book,
         anchor: globalPosition,
@@ -373,9 +373,15 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         );
         return FadeTransition(
           opacity: curved,
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
-            child: child,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.025),
+              end: Offset.zero,
+            ).animate(curved),
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+              child: child,
+            ),
           ),
         );
       },
@@ -1836,7 +1842,11 @@ class _BookContextMenuPopup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
-    const menuWidth = 236.0;
+    final author = book.author?.trim();
+    final hasAuthor = author != null && author.isNotEmpty;
+    const menuWidth = 232.0;
+    const menuRadius = 18.0;
+    final estimatedMenuHeight = hasAuthor ? 286.0 : 270.0;
     final safeTop = mediaQuery.padding.top + 12;
     final safeLeft = 12.0;
     final safeRight = mediaQuery.size.width - menuWidth - 12;
@@ -1844,10 +1854,35 @@ class _BookContextMenuPopup extends StatelessWidget {
       safeLeft,
       safeRight < safeLeft ? safeLeft : safeRight,
     );
-    final top = (anchor.dy - 12).clamp(
+    final maxTop = mediaQuery.size.height -
+        mediaQuery.padding.bottom -
+        estimatedMenuHeight -
+        12;
+    final showAboveAnchor =
+        anchor.dy + estimatedMenuHeight >
+            mediaQuery.size.height - mediaQuery.padding.bottom - 12 &&
+        anchor.dy - estimatedMenuHeight > safeTop;
+    final preferredTop = showAboveAnchor
+        ? anchor.dy - estimatedMenuHeight + 14
+        : anchor.dy - 14;
+    final top = preferredTop.clamp(
       safeTop,
-      mediaQuery.size.height - mediaQuery.padding.bottom - 260,
+      maxTop < safeTop ? safeTop : maxTop,
     );
+    final background = Color.lerp(
+      theme.cardBackgroundColor,
+      CupertinoDynamicColor.resolve(
+        CupertinoColors.systemBackground.withValues(alpha: 0.94),
+        context,
+      ),
+      0.54,
+    )!;
+    final border = Color.lerp(
+      theme.dividerColor,
+      theme.scaffoldBackgroundColor,
+      0.28,
+    )!
+        .withValues(alpha: 0.72);
 
     return Stack(
       children: [
@@ -1862,62 +1897,75 @@ class _BookContextMenuPopup extends StatelessWidget {
           top: top.toDouble(),
           child: SizedBox(
             width: menuWidth,
-            child: CupertinoPopupSurface(
-              blurSigma: 18,
-              isSurfacePainted: false,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: CupertinoDynamicColor.resolve(
-                    CupertinoColors.systemBackground.withOpacity(0.92),
-                    context,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(menuRadius),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 7),
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: theme.dividerColor.withValues(alpha: 0.28),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(menuRadius),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: background.withValues(alpha: 0.78),
+                      borderRadius: BorderRadius.circular(menuRadius),
+                      border: Border.all(color: border, width: 1),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _BookContextMenuHeader(book: book, theme: theme),
+                        const _BookContextMenuDivider(),
+                        _BookContextMenuAction(
+                          action: _BookQuickAction.details,
+                          icon: CupertinoIcons.info_circle,
+                          label: LocaleText.of(
+                            context,
+                            zh: '书籍详情',
+                            en: 'Book Details',
+                          ),
+                          theme: theme,
+                        ),
+                        const _BookContextMenuDivider(),
+                        _BookContextMenuAction(
+                          action: _BookQuickAction.changeCover,
+                          icon: CupertinoIcons.photo,
+                          label: LocaleText.of(
+                            context,
+                            zh: '修改封面',
+                            en: 'Change Cover',
+                          ),
+                          theme: theme,
+                        ),
+                        const _BookContextMenuDivider(),
+                        _BookContextMenuAction(
+                          action: _BookQuickAction.stats,
+                          icon: CupertinoIcons.chart_bar,
+                          label: LocaleText.of(
+                            context,
+                            zh: '阅读统计',
+                            en: 'Reading Stats',
+                          ),
+                          theme: theme,
+                        ),
+                        const _BookContextMenuDivider(),
+                        _BookContextMenuAction(
+                          action: _BookQuickAction.delete,
+                          icon: CupertinoIcons.delete,
+                          label: LocaleText.of(context, zh: '删除', en: 'Delete'),
+                          theme: theme,
+                          isDestructive: true,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _BookContextMenuHeader(book: book, theme: theme),
-                    const _BookContextMenuDivider(),
-                    _BookContextMenuAction(
-                      action: _BookQuickAction.details,
-                      icon: CupertinoIcons.info_circle,
-                      label: LocaleText.of(
-                        context,
-                        zh: '书籍详情',
-                        en: 'Book Details',
-                      ),
-                    ),
-                    const _BookContextMenuDivider(),
-                    _BookContextMenuAction(
-                      action: _BookQuickAction.changeCover,
-                      icon: CupertinoIcons.photo,
-                      label: LocaleText.of(
-                        context,
-                        zh: '修改封面',
-                        en: 'Change Cover',
-                      ),
-                    ),
-                    const _BookContextMenuDivider(),
-                    _BookContextMenuAction(
-                      action: _BookQuickAction.stats,
-                      icon: CupertinoIcons.chart_bar,
-                      label: LocaleText.of(
-                        context,
-                        zh: '阅读统计',
-                        en: 'Reading Stats',
-                      ),
-                    ),
-                    const _BookContextMenuDivider(),
-                    _BookContextMenuAction(
-                      action: _BookQuickAction.delete,
-                      icon: CupertinoIcons.delete,
-                      label: LocaleText.of(context, zh: '删除', en: 'Delete'),
-                      isDestructive: true,
-                    ),
-                  ],
                 ),
               ),
             ),
@@ -1936,30 +1984,75 @@ class _BookContextMenuHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final author = book.author?.trim();
+    final hasAuthor = author != null && author.isNotEmpty;
+    final subtitleColor = Color.lerp(
+      theme.secondaryTextColor,
+      theme.textColor,
+      0.18,
+    )!;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      padding: const EdgeInsets.fromLTRB(13, 13, 13, 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: SizedBox(
-              width: 34,
-              height: 46,
-              child: BookCoverWidget(book: book, width: 34, height: 46),
+          Container(
+            width: 36,
+            height: 50,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: BookCoverWidget(book: book, width: 36, height: 50),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              book.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: theme.textColor,
-                decoration: TextDecoration.none,
-                decorationColor: Colors.transparent,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      height: 1.15,
+                      color: theme.textColor,
+                      decoration: TextDecoration.none,
+                      decorationColor: Colors.transparent,
+                    ),
+                  ),
+                  if (hasAuthor) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        height: 1.1,
+                        color: subtitleColor,
+                        decoration: TextDecoration.none,
+                        decorationColor: Colors.transparent,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
@@ -1973,48 +2066,72 @@ class _BookContextMenuAction extends StatelessWidget {
   final _BookQuickAction action;
   final IconData icon;
   final String label;
+  final AppThemeData theme;
   final bool isDestructive;
 
   const _BookContextMenuAction({
     required this.action,
     required this.icon,
     required this.label,
+    required this.theme,
     this.isDestructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive
+    final foreground = isDestructive
         ? CupertinoColors.systemRed.resolveFrom(context)
-        : CupertinoColors.label.resolveFrom(context);
+        : theme.textColor.withValues(alpha: 0.94);
+    final pressedBackground = isDestructive
+        ? CupertinoColors.systemRed.resolveFrom(context).withValues(alpha: 0.08)
+        : theme.primaryColor.withValues(alpha: 0.08);
 
-    return CupertinoButton(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      minimumSize: Size.zero,
-      borderRadius: BorderRadius.zero,
-      onPressed: () => Navigator.pop(context, action),
-      child: DefaultTextStyle.merge(
-        style: const TextStyle(
-          decoration: TextDecoration.none,
-          decorationColor: Colors.transparent,
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: color,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: InkWell(
+            onTap: () => Navigator.pop(context, action),
+            borderRadius: BorderRadius.circular(12),
+            splashColor: pressedBackground,
+            highlightColor: pressedBackground,
+            hoverColor: pressedBackground.withValues(alpha: 0.72),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 42),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+              child: DefaultTextStyle.merge(
+                style: const TextStyle(
                   decoration: TextDecoration.none,
                   decorationColor: Colors.transparent,
                 ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: isDestructive
+                              ? FontWeight.w500
+                              : FontWeight.w400,
+                          color: foreground,
+                          letterSpacing: -0.1,
+                          decoration: TextDecoration.none,
+                          decorationColor: Colors.transparent,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Icon(icon, size: 16, color: foreground.withValues(alpha: 0.82)),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 10),
-            Icon(icon, size: 18, color: color),
-          ],
+          ),
         ),
       ),
     );
@@ -2028,8 +2145,8 @@ class _BookContextMenuDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 0.5,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      color: CupertinoColors.separator.resolveFrom(context),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      color: CupertinoColors.separator.resolveFrom(context).withValues(alpha: 0.42),
     );
   }
 }
