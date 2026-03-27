@@ -34,6 +34,9 @@ dependencies:
   just_audio: ^0.10.4
   audio_session: ^0.2.1
   just_audio_background: ^0.0.1-beta.17
+  
+  # WebView for in-app browser
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:

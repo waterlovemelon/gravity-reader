@@ -28,6 +28,7 @@ import 'package:myreader/flureadium_integration/epub_parser.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:myreader/presentation/widgets/bookshelf/bookshelf_grid_widget.dart';
+import 'package:myreader/presentation/pages/bookshelf/cover_search_browser_page.dart';
 
 class BookshelfPage extends ConsumerStatefulWidget {
   const BookshelfPage({super.key});
@@ -946,6 +947,63 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   }
 
   Future<void> _changeBookCover(Book book) async {
+    final theme = ref.read(currentThemeProvider);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: theme.cardBackgroundColor,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _text(zh: '修改封面', en: 'Change Cover'),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: theme.textColor,
+                ),
+              ),
+              const SizedBox(height: 20),
+              _CoverSourceOption(
+                icon: Icons.language_rounded,
+                label: _text(zh: '联网搜索', en: 'Search Online'),
+                subtitle: _text(
+                  zh: '使用浏览器搜索封面图片',
+                  en: 'Search cover image in browser',
+                ),
+                theme: theme,
+                onTap: () => Navigator.pop(ctx, 'online'),
+              ),
+              const SizedBox(height: 12),
+              _CoverSourceOption(
+                icon: Icons.photo_library_rounded,
+                label: _text(zh: '本地图片', en: 'Local Image'),
+                subtitle: _text(
+                  zh: '从相册或文件中选择',
+                  en: 'Pick from gallery or files',
+                ),
+                theme: theme,
+                onTap: () => Navigator.pop(ctx, 'local'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+
+    if (choice == 'local') {
+      await _pickLocalCover(book);
+    } else if (choice == 'online') {
+      await _searchOnlineCover(book);
+    }
+  }
+
+  Future<void> _pickLocalCover(Book book) async {
     try {
       String? pickedPath;
       if (Platform.isIOS || Platform.isAndroid) {
@@ -967,9 +1025,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         }
       }
 
-      if (pickedPath == null || pickedPath.isEmpty) {
-        return;
-      }
+      if (pickedPath == null || pickedPath.isEmpty) return;
 
       final sourceFile = File(pickedPath);
       if (!await sourceFile.exists()) {
@@ -1000,17 +1056,66 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         );
       }
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showTopNotice(
         message: _text(zh: '封面已更新', en: 'Cover updated'),
         kind: _TopNoticeKind.success,
       );
     } catch (e) {
-      if (!mounted) {
-        return;
+      if (!mounted) return;
+      _showTopNotice(
+        message: '${_text(zh: '修改封面失败', en: 'Failed to update cover')}: $e',
+        kind: _TopNoticeKind.error,
+      );
+    }
+  }
+
+  Future<void> _searchOnlineCover(Book book) async {
+    try {
+      final theme = ref.read(currentThemeProvider);
+      final result = await showModalBottomSheet<CoverSearchResult>(
+        context: context,
+        isScrollControlled: true,
+        enableDrag: false,
+        backgroundColor: theme.cardBackgroundColor,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => CoverSearchBrowserSheet(bookTitle: book.title),
+      );
+
+      if (result == null || !mounted) return;
+
+      // 直接用浏览器已下载的字节,不再重复下载
+      final appDir = await getApplicationDocumentsDirectory();
+      final coversDir = Directory('${appDir.path}/covers');
+      if (!await coversDir.exists()) {
+        await coversDir.create(recursive: true);
       }
+
+      final targetPath =
+          '${coversDir.path}/custom_cover_${book.id}_${DateTime.now().millisecondsSinceEpoch}.${result.extension}';
+      final targetFile = File(targetPath);
+      await targetFile.writeAsBytes(result.bytes, flush: true);
+      await FileImage(targetFile).evict();
+
+      await _updateBook(book, coverPath: targetFile.path);
+
+      final previousCoverPath = book.coverPath;
+      if (previousCoverPath != null && previousCoverPath != targetFile.path) {
+        await _deleteManagedFile(
+          previousCoverPath,
+          managedFolderName: 'covers',
+        );
+      }
+
+      if (!mounted) return;
+      _showTopNotice(
+        message: _text(zh: '封面已更新', en: 'Cover updated'),
+        kind: _TopNoticeKind.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
       _showTopNotice(
         message: '${_text(zh: '修改封面失败', en: 'Failed to update cover')}: $e',
         kind: _TopNoticeKind.error,
@@ -2729,4 +2834,82 @@ class _TopNoticePalette {
     required this.foreground,
     required this.icon,
   });
+}
+
+class _CoverSourceOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final AppThemeData theme;
+  final VoidCallback onTap;
+
+  const _CoverSourceOption({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.theme,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.dividerColor.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: theme.primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: theme.primaryColor, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: theme.secondaryTextColor,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
