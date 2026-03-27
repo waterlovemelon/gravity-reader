@@ -172,6 +172,12 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                             theme: theme,
                             onTap: () => _openReader(currentBook),
                             onListenTap: () => _handleListenTap(currentBook),
+                            onLongPressStart: _isSelectionMode
+                                ? null
+                                : (details) => _handleBookMenuRequest(
+                                    currentBook,
+                                    details.globalPosition,
+                                  ),
                           ),
                         ],
                         SizedBox(
@@ -1634,6 +1640,7 @@ class _CurrentlyReadingCard extends StatelessWidget {
   final AppThemeData theme;
   final VoidCallback onTap;
   final VoidCallback onListenTap;
+  final ValueChanged<LongPressStartDetails>? onLongPressStart;
 
   const _CurrentlyReadingCard({
     required this.book,
@@ -1641,6 +1648,7 @@ class _CurrentlyReadingCard extends StatelessWidget {
     required this.theme,
     required this.onTap,
     required this.onListenTap,
+    this.onLongPressStart,
   });
 
   @override
@@ -1660,184 +1668,193 @@ class _CurrentlyReadingCard extends StatelessWidget {
     final badgeBackground = warmAccent.withValues(alpha: 0.16);
     final badgeTextColor = Color.lerp(theme.textColor, warmAccent, 0.5)!;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(26),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color.lerp(cardHighlight, Colors.white, 0.14) ?? cardHighlight,
-                cardBase,
-                theme.cardBackgroundColor,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: onLongPressStart,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(26),
+          onTap: onTap,
+          child: Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.lerp(cardHighlight, Colors.white, 0.14) ??
+                      cardHighlight,
+                  cardBase,
+                  theme.cardBackgroundColor,
+                ],
+                stops: const [0, 0.38, 1],
+              ),
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.035),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  blurRadius: 7,
+                  offset: const Offset(0, -1),
+                ),
               ],
-              stops: const [0, 0.38, 1],
             ),
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.035),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-              BoxShadow(
-                color: Colors.white.withValues(alpha: 0.12),
-                blurRadius: 7,
-                offset: const Offset(0, -1),
-              ),
-            ],
-          ),
-          child: SizedBox(
-            height: 136,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 106,
-                  child: AspectRatio(
-                    aspectRatio: 0.72,
-                    child: BookCoverWidget(
-                      book: book,
-                      width: double.infinity,
-                      height: double.infinity,
+            child: SizedBox(
+              height: 136,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 106,
+                    child: AspectRatio(
+                      aspectRatio: 0.72,
+                      child: BookCoverWidget(
+                        book: book,
+                        width: double.infinity,
+                        height: double.infinity,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          book.title,
-                          style: TextStyle(
-                            fontSize: 19.5,
-                            height: 1.1,
-                            fontWeight: FontWeight.w700,
-                            color: theme.textColor,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          book.author?.trim().isNotEmpty == true
-                              ? book.author!
-                              : LocaleText.of(
-                                  context,
-                                  zh: '未知作者',
-                                  en: 'Unknown Author',
-                                ),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: theme.secondaryTextColor.withValues(
-                              alpha: 0.9,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            book.title,
+                            style: TextStyle(
+                              fontSize: 19.5,
+                              height: 1.1,
+                              fontWeight: FontWeight.w700,
+                              color: theme.textColor,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                LocaleText.of(
-                                  context,
-                                  zh: '阅读进度',
-                                  en: 'Progress',
+                          const SizedBox(height: 3),
+                          Text(
+                            book.author?.trim().isNotEmpty == true
+                                ? book.author!
+                                : LocaleText.of(
+                                    context,
+                                    zh: '未知作者',
+                                    en: 'Unknown Author',
+                                  ),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: theme.secondaryTextColor.withValues(
+                                alpha: 0.9,
+                              ),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const Spacer(),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  LocaleText.of(
+                                    context,
+                                    zh: '阅读进度',
+                                    en: 'Progress',
+                                  ),
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: theme.secondaryTextColor.withValues(
+                                      alpha: 0.72,
+                                    ),
+                                  ),
                                 ),
+                              ),
+                              Text(
+                                '${(value * 100).round()}%',
                                 style: TextStyle(
                                   fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
                                   color: theme.secondaryTextColor.withValues(
                                     alpha: 0.72,
                                   ),
                                 ),
                               ),
-                            ),
-                            Text(
-                              '${(value * 100).round()}%',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: theme.secondaryTextColor.withValues(
-                                  alpha: 0.72,
-                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(999),
+                            child: LinearProgressIndicator(
+                              value: value,
+                              minHeight: 4,
+                              backgroundColor: theme.dividerColor,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                theme.primaryColor,
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: value,
-                            minHeight: 4,
-                            backgroundColor: theme.dividerColor,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              theme.primaryColor,
                             ),
                           ),
-                        ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: badgeBackground,
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                LocaleText.of(
-                                  context,
-                                  zh: '正在阅读',
-                                  en: 'Reading',
-                                ),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: badgeTextColor,
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            FilledButton.tonal(
-                              onPressed: onListenTap,
-                              style: FilledButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                minimumSize: const Size(86, 41),
+                          const Spacer(),
+                          Row(
+                            children: [
+                              Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: 10,
+                                  vertical: 4,
                                 ),
-                                shape: RoundedRectangleBorder(
+                                decoration: BoxDecoration(
+                                  color: badgeBackground,
                                   borderRadius: BorderRadius.circular(999),
                                 ),
-                                backgroundColor: theme.primaryColor,
-                                foregroundColor: Colors.white,
+                                child: Text(
+                                  LocaleText.of(
+                                    context,
+                                    zh: '正在阅读',
+                                    en: 'Reading',
+                                  ),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: badgeTextColor,
+                                  ),
+                                ),
                               ),
-                              child: Text(
-                                LocaleText.of(context, zh: '听书', en: 'Listen'),
+                              const Spacer(),
+                              FilledButton.tonal(
+                                onPressed: onListenTap,
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  minimumSize: const Size(86, 41),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  backgroundColor: theme.primaryColor,
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: Text(
+                                  LocaleText.of(
+                                    context,
+                                    zh: '听书',
+                                    en: 'Listen',
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
