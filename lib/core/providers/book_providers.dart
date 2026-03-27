@@ -137,6 +137,17 @@ class BooksNotifier extends StateNotifier<BooksState> {
     }
   }
 
+  Future<void> updateBook(Book book) async {
+    try {
+      final updateBook = _ref.read(updateBookUseCaseProvider);
+      await updateBook(book);
+      await loadBooks();
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+      rethrow;
+    }
+  }
+
   Future<List<Book>> _applySort(List<Book> books, BookSortMode mode) async {
     final sorted = List<Book>.from(books);
     switch (mode) {

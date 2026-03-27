@@ -805,88 +805,50 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: theme.cardBackgroundColor,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 76,
-                    height: 104,
-                    child: BookCoverWidget(
-                      book: book,
-                      width: double.infinity,
-                      height: double.infinity,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          book.title,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          book.author?.trim().isNotEmpty == true
-                              ? book.author!
-                              : _text(zh: '未知作者', en: 'Unknown Author'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: theme.secondaryTextColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _BookMetaRow(
-                label: _text(zh: '分类', en: 'Category'),
-                value: categoryName,
-              ),
-              _BookMetaRow(
-                label: _text(zh: '总页数', en: 'Pages'),
-                value:
-                    book.totalPages?.toString() ??
-                    _text(zh: '未知', en: 'Unknown'),
-              ),
-              _BookMetaRow(
-                label: _text(zh: '文件大小', en: 'File Size'),
-                value: _formatFileSize(book.fileSize),
-              ),
-              _BookMetaRow(
-                label: _text(zh: '导入时间', en: 'Imported'),
-                value: _formatDateTime(book.importedAt),
-              ),
-              _BookMetaRow(
-                label: _text(zh: '最近阅读', en: 'Last Read'),
-                value: book.lastReadAt == null
-                    ? _text(zh: '未开始', en: 'Not started')
-                    : _formatDateTime(book.lastReadAt!),
-              ),
-              _BookMetaRow(
-                label: _text(zh: '文件路径', en: 'Path'),
-                value: book.epubPath,
-                maxLines: 2,
-              ),
-            ],
-          ),
-        ),
+      builder: (context) => _EditableBookDetailsSheet(
+        book: book,
+        theme: theme,
+        categoryName: categoryName,
+        formatFileSize: _formatFileSize,
+        formatDateTime: _formatDateTime,
+        textBuilder: _text,
+        onSave: (title, author) =>
+            _updateBookDetails(book, title: title, author: author),
       ),
+    );
+  }
+
+  Future<void> _updateBookDetails(
+    Book book, {
+    required String title,
+    required String author,
+  }) async {
+    final normalizedTitle = title.trim();
+    final normalizedAuthor = author.trim();
+    final updatedBook = Book(
+      id: book.id,
+      title: normalizedTitle,
+      author: normalizedAuthor.isEmpty ? null : normalizedAuthor,
+      coverPath: book.coverPath,
+      epubPath: book.epubPath,
+      totalPages: book.totalPages,
+      fileSize: book.fileSize,
+      importedAt: book.importedAt,
+      lastReadAt: book.lastReadAt,
+      categoryId: book.categoryId,
+    );
+
+    await ref.read(booksProvider.notifier).updateBook(updatedBook);
+    if (!mounted) {
+      return;
+    }
+    ref.invalidate(allReadingProgressProvider);
+    _showTopNotice(
+      message: _text(zh: '已更新书籍信息', en: 'Book details updated'),
+      kind: _TopNoticeKind.success,
     );
   }
 
@@ -2030,6 +1992,340 @@ class _BookContextMenuDivider extends StatelessWidget {
       height: 0.5,
       margin: const EdgeInsets.symmetric(horizontal: 12),
       color: CupertinoColors.separator.resolveFrom(context),
+    );
+  }
+}
+
+class _EditableBookDetailsSheet extends StatefulWidget {
+  final Book book;
+  final AppThemeData theme;
+  final String categoryName;
+  final String Function(int bytes) formatFileSize;
+  final String Function(DateTime value) formatDateTime;
+  final String Function({required String zh, required String en}) textBuilder;
+  final Future<void> Function(String title, String author) onSave;
+
+  const _EditableBookDetailsSheet({
+    required this.book,
+    required this.theme,
+    required this.categoryName,
+    required this.formatFileSize,
+    required this.formatDateTime,
+    required this.textBuilder,
+    required this.onSave,
+  });
+
+  @override
+  State<_EditableBookDetailsSheet> createState() =>
+      _EditableBookDetailsSheetState();
+}
+
+class _EditableBookDetailsSheetState extends State<_EditableBookDetailsSheet> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleController;
+  late final TextEditingController _authorController;
+  bool _isSaving = false;
+
+  String _text({required String zh, required String en}) {
+    return widget.textBuilder(zh: zh, en: en);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.book.title);
+    _authorController = TextEditingController(text: widget.book.author ?? '');
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _authorController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSave() async {
+    final form = _formKey.currentState;
+    if (form == null || !form.validate() || _isSaving) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      await widget.onSave(_titleController.text, _authorController.text);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_text(zh: '保存失败', en: 'Failed to save')}: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final book = widget.book;
+    final theme = widget.theme;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return SafeArea(
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.fromLTRB(20, 4, 20, bottomInset + 20),
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.scaffoldBackgroundColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox(
+                          width: 76,
+                          height: 104,
+                          child: BookCoverWidget(
+                            book: book,
+                            width: double.infinity,
+                            height: double.infinity,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _text(zh: '编辑书籍信息', en: 'Edit Book Details'),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: theme.textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _text(
+                                zh: '可修改书名和作者，保存后会同步更新书架展示。',
+                                en: 'Update the title and author, then save to persist the changes.',
+                              ),
+                              style: TextStyle(
+                                fontSize: 13,
+                                height: 1.4,
+                                color: theme.secondaryTextColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _BookDetailsInputField(
+                  controller: _titleController,
+                  label: _text(zh: '书名', en: 'Title'),
+                  hintText: _text(zh: '输入书名', en: 'Enter title'),
+                  textInputAction: TextInputAction.next,
+                  maxLength: 80,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return _text(zh: '书名不能为空', en: 'Title is required');
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+                _BookDetailsInputField(
+                  controller: _authorController,
+                  label: _text(zh: '作者', en: 'Author'),
+                  hintText: _text(zh: '输入作者名', en: 'Enter author name'),
+                  textInputAction: TextInputAction.done,
+                  maxLength: 60,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  _text(zh: '更多信息', en: 'More Information'),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: theme.textColor,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  decoration: BoxDecoration(
+                    color: theme.scaffoldBackgroundColor,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Column(
+                    children: [
+                      _BookMetaRow(
+                        label: _text(zh: '分类', en: 'Category'),
+                        value: widget.categoryName,
+                      ),
+                      _BookMetaRow(
+                        label: _text(zh: '总页数', en: 'Pages'),
+                        value:
+                            book.totalPages?.toString() ??
+                            _text(zh: '未知', en: 'Unknown'),
+                      ),
+                      _BookMetaRow(
+                        label: _text(zh: '文件大小', en: 'File Size'),
+                        value: widget.formatFileSize(book.fileSize),
+                      ),
+                      _BookMetaRow(
+                        label: _text(zh: '导入时间', en: 'Imported'),
+                        value: widget.formatDateTime(book.importedAt),
+                      ),
+                      _BookMetaRow(
+                        label: _text(zh: '最近阅读', en: 'Last Read'),
+                        value: book.lastReadAt == null
+                            ? _text(zh: '未开始', en: 'Not started')
+                            : widget.formatDateTime(book.lastReadAt!),
+                      ),
+                      _BookMetaRow(
+                        label: _text(zh: '文件路径', en: 'Path'),
+                        value: book.epubPath,
+                        maxLines: 2,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _isSaving ? null : _handleSave,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: theme.textColor,
+                      foregroundColor: theme.cardBackgroundColor,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: _isSaving
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                theme.cardBackgroundColor,
+                              ),
+                            ),
+                          )
+                        : Text(_text(zh: '保存修改', en: 'Save Changes')),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BookDetailsInputField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final String hintText;
+  final TextInputAction textInputAction;
+  final int maxLength;
+  final String? Function(String?)? validator;
+
+  const _BookDetailsInputField({
+    required this.controller,
+    required this.label,
+    required this.hintText,
+    required this.textInputAction,
+    required this.maxLength,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          textInputAction: textInputAction,
+          maxLength: maxLength,
+          validator: validator,
+          decoration: InputDecoration(
+            hintText: hintText,
+            counterText: '',
+            filled: true,
+            fillColor: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.45,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: theme.colorScheme.primary,
+                width: 1.4,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
