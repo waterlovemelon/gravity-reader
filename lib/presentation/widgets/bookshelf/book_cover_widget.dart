@@ -105,7 +105,7 @@ class BookCoverImage extends ConsumerWidget {
         child: const Center(
           child: Icon(
             Icons.auto_stories_rounded,
-            color: Color(0xFF6B7F6A),
+            color: Color(0xFF9C27B0), // Purple for books/reading
             size: 28,
           ),
         ),

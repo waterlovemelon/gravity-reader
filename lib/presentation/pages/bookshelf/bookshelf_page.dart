@@ -131,11 +131,19 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             ),
           ),
           IconButton(
-            icon: Icon(_isSearching ? Icons.close_rounded : Icons.search),
+            icon: Icon(
+              _isSearching ? Icons.close_rounded : Icons.search,
+              color: _isSearching
+                  ? const Color(0xFFF44336) // Red for close
+                  : const Color(0xFF2196F3), // Blue for search
+            ),
             onPressed: _toggleSearch,
           ),
           IconButton(
-            icon: const Icon(Icons.add_rounded),
+            icon: const Icon(
+              Icons.add_rounded,
+              color: Color(0xFF9C27B0),
+            ), // Purple for add/books
             onPressed: _importBook,
           ),
         ],
@@ -266,7 +274,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                             Icon(
                               Icons.error_outline,
                               size: 48,
-                              color: theme.secondaryTextColor,
+                              color: const Color(0xFFF44336), // Red for error
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -532,7 +540,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                   ),
                   title: Text(_sortMenuLabel(mode)),
                   trailing: selected
-                      ? Icon(Icons.check_rounded, color: theme.primaryColor)
+                      ? const Icon(
+                          Icons.check_rounded,
+                          color: Color(0xFF4CAF50),
+                        ) // Green for check
                       : null,
                   onTap: () => Navigator.pop(context, mode),
                 );
@@ -573,7 +584,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
-                leading: const Icon(Icons.add_circle_outline_rounded),
+                leading: const Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: Color(0xFF9C27B0),
+                ), // Purple for add
                 title: Text(_text(zh: '新建分类', en: 'New Category')),
                 onTap: () => Navigator.pop(
                   context,
@@ -584,7 +598,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
-                leading: const Icon(Icons.clear_all_rounded),
+                leading: const Icon(
+                  Icons.clear_all_rounded,
+                  color: Color(0xFFF44336),
+                ), // Red for clear
                 title: Text(_text(zh: '未分类', en: 'Uncategorized')),
                 onTap: () => Navigator.pop(
                   context,
@@ -1816,7 +1833,8 @@ class _BookContextMenuPopup extends StatelessWidget {
       safeLeft,
       safeRight < safeLeft ? safeLeft : safeRight,
     );
-    final maxTop = mediaQuery.size.height -
+    final maxTop =
+        mediaQuery.size.height -
         mediaQuery.padding.bottom -
         estimatedMenuHeight -
         12;
@@ -1843,8 +1861,7 @@ class _BookContextMenuPopup extends StatelessWidget {
       theme.dividerColor,
       theme.scaffoldBackgroundColor,
       0.28,
-    )!
-        .withValues(alpha: 0.72);
+    )!.withValues(alpha: 0.72);
 
     return Stack(
       children: [
@@ -2053,9 +2070,7 @@ class _BookContextMenuAction extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
           child: InkWell(
             onTap: () => Navigator.pop(context, action),
             borderRadius: BorderRadius.circular(12),
@@ -2088,7 +2103,11 @@ class _BookContextMenuAction extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Icon(icon, size: 16, color: foreground.withValues(alpha: 0.82)),
+                    Icon(
+                      icon,
+                      size: 16,
+                      color: foreground.withValues(alpha: 0.82),
+                    ),
                   ],
                 ),
               ),
@@ -2108,7 +2127,9 @@ class _BookContextMenuDivider extends StatelessWidget {
     return Container(
       height: 0.5,
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      color: CupertinoColors.separator.resolveFrom(context).withValues(alpha: 0.42),
+      color: CupertinoColors.separator
+          .resolveFrom(context)
+          .withValues(alpha: 0.42),
     );
   }
 }

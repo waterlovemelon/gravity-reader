@@ -1282,7 +1282,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Row(
                     children: [
-                      Icon(Icons.arrow_back, size: 20, color: _textColor),
+                      Icon(
+                        Icons.arrow_back,
+                        size: 20,
+                        color: const Color(0xFF757575),
+                      ), // Gray for back navigation
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -1587,7 +1591,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           minHeight: 32,
                         ),
                         iconSize: 20,
-                        icon: Icon(Icons.arrow_back, color: _textColor),
+                        icon: Icon(
+                          Icons.arrow_back,
+                          color: const Color(0xFF757575),
+                        ), // Gray for back navigation
                         onPressed: () async {
                           await _persistCurrentBookProgress(book);
                           if (mounted) {
@@ -2835,7 +2842,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             onPressed: onBack,
             icon: Icon(
               Icons.chevron_left_rounded,
-              color: _textColor.withOpacity(0.72),
+              color: const Color(
+                0xFF757575,
+              ).withValues(alpha: 0.72), // Gray for navigation
             ),
           ),
           const SizedBox(width: 4),
@@ -2978,7 +2987,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               Icon(
                 Icons.chevron_right_rounded,
                 size: 18,
-                color: _textColor.withOpacity(0.38),
+                color: const Color(
+                  0xFF757575,
+                ).withValues(alpha: 0.38), // Gray for navigation
               ),
             ],
           ),
@@ -5751,8 +5762,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         !ttsState.isAudiobookUiVisible &&
         (ttsState.isSpeaking || ttsState.isPaused || isLoadingAudio);
     final capsuleColor = _controlSurfaceColor;
-    final primaryIconColor = _textColor;
-    final secondaryIconColor = _textColor.withOpacity(0.78);
+    // Blue for play/pause, Red for close
+    final primaryIconColor = const Color(0xFF2196F3);
+    final secondaryIconColor = const Color(0xFFF44336);
     final progressColor = _isDarkReaderBackground
         ? Colors.white.withOpacity(0.82)
         : const Color(0xFFF0F8F2);

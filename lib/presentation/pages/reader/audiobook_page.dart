@@ -1708,7 +1708,7 @@ class _AudiobookPageState extends ConsumerState<AudiobookPage>
                   child: Icon(
                     isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                     size: 42,
-                    color: _textPrimary,
+                    color: const Color(0xFF2196F3), // Blue for play/pause
                   ),
                 ),
               ),

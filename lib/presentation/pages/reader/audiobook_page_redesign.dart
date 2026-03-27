@@ -1020,7 +1020,10 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                           : () => ref
                                 .read(ttsProvider.notifier)
                                 .loadVoices(locale: locale),
-                      icon: Icon(Icons.refresh_rounded, color: _textPrimary),
+                      icon: Icon(
+                        Icons.refresh_rounded,
+                        color: const Color(0xFF4CAF50),
+                      ), // Green for refresh/reload
                     ),
                   ],
                 ),
@@ -1345,7 +1348,9 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                                 if (selected)
                                   Icon(
                                     Icons.play_circle_fill_rounded,
-                                    color: _textPrimary,
+                                    color: const Color(
+                                      0xFF2196F3,
+                                    ), // Blue for audio/play
                                     size: 22,
                                   ),
                               ],
@@ -1925,14 +1930,18 @@ class _AudiobookPageRedesignState extends ConsumerState<AudiobookPageRedesign>
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        canPlay ? _textPrimary : _textTertiary,
+                        canPlay
+                            ? const Color(0xFF2196F3)
+                            : const Color(0xFF757575),
                       ),
                     ),
                   )
                 : Icon(
                     isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                     size: 44,
-                    color: canPlay ? _textPrimary : _textTertiary,
+                    color: canPlay
+                        ? const Color(0xFF2196F3) // Blue for play/pause
+                        : const Color(0xFF757575), // Gray for disabled
                   ),
           ),
         ),

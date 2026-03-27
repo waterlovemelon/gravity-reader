@@ -24,7 +24,11 @@ class TableOfContentsWidget extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.list, size: 48, color: theme.secondaryTextColor),
+            Icon(
+              Icons.list,
+              size: 48,
+              color: const Color(0xFF9C27B0),
+            ), // Purple for list/TOC
             const SizedBox(height: 16),
             Text(
               'No chapters available',
@@ -43,7 +47,10 @@ class TableOfContentsWidget extends ConsumerWidget {
 
         return ListTile(
           leading: isCurrentChapter
-              ? Icon(Icons.play_arrow, color: theme.primaryColor)
+              ? const Icon(
+                  Icons.play_arrow,
+                  color: Color(0xFF2196F3),
+                ) // Blue for play
               : Text(
                   '${index + 1}',
                   style: TextStyle(color: theme.secondaryTextColor),
@@ -58,7 +65,11 @@ class TableOfContentsWidget extends ConsumerWidget {
             ),
           ),
           trailing: isCurrentChapter
-              ? Icon(Icons.bookmark, color: theme.primaryColor, size: 20)
+              ? const Icon(
+                  Icons.bookmark,
+                  color: Color(0xFFE91E63),
+                  size: 20,
+                ) // Pink for bookmark
               : null,
           onTap: () => onChapterTap?.call(chapter),
         );

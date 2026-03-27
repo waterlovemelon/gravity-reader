@@ -54,7 +54,10 @@ class _BrightnessControlWidgetState extends State<BrightnessControlWidget> {
           const SizedBox(height: 16),
           Row(
             children: [
-              const Icon(Icons.brightness_low),
+              const Icon(
+                Icons.brightness_low,
+                color: Color(0xFF2196F3),
+              ), // Blue for brightness
               Expanded(
                 child: Slider(
                   value: _brightness,
@@ -69,7 +72,10 @@ class _BrightnessControlWidgetState extends State<BrightnessControlWidget> {
                   },
                 ),
               ),
-              const Icon(Icons.brightness_high),
+              const Icon(
+                Icons.brightness_high,
+                color: Color(0xFF2196F3),
+              ), // Blue for brightness
             ],
           ),
           const SizedBox(height: 8),

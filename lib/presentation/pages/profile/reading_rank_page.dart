@@ -90,10 +90,15 @@ class _RankHero extends ConsumerWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: theme.primaryColor.withValues(alpha: 0.14),
+              color: const Color(
+                0xFFFFD700,
+              ).withValues(alpha: 0.14), // Gold for trophy
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(Icons.emoji_events_outlined, color: theme.primaryColor),
+            child: Icon(
+              Icons.emoji_events_outlined,
+              color: const Color(0xFFFFD700),
+            ), // Gold
           ),
           const SizedBox(width: 14),
           Expanded(

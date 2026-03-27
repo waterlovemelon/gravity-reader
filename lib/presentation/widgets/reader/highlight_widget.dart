@@ -53,7 +53,11 @@ class HighlightWidget extends StatelessWidget {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  Icon(Icons.note, size: 12, color: Colors.grey[600]),
+                  Icon(
+                    Icons.note,
+                    size: 12,
+                    color: const Color(0xFF009688),
+                  ), // Teal for notes
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(

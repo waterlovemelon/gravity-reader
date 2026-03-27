@@ -83,6 +83,9 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
         theme.primaryColor;
     final ringBorder =
         Color.lerp(theme.primaryColor, Colors.white, 0.5) ?? theme.primaryColor;
+    // Colorful icon colors for overlay controls
+    final blueAccent = const Color(0xFF2196F3);
+    final redAccent = const Color(0xFFF44336);
 
     return Positioned(
       left: 16,
@@ -166,7 +169,7 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                               ? Icons.pause_rounded
                               : Icons.play_arrow_rounded,
                           size: 22,
-                          color: primaryIconColor,
+                          color: blueAccent,
                         ),
                         if (isLoadingAudio)
                           Positioned.fill(
@@ -176,9 +179,9 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2.2,
                                   valueColor: AlwaysStoppedAnimation<Color>(
-                                    primaryIconColor,
+                                    blueAccent,
                                   ),
-                                  backgroundColor: primaryIconColor.withValues(
+                                  backgroundColor: blueAccent.withValues(
                                     alpha: 0.14,
                                   ),
                                 ),
@@ -205,7 +208,7 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
                     child: Icon(
                       Icons.close_rounded,
                       size: 22,
-                      color: secondaryIconColor,
+                      color: redAccent,
                     ),
                   ),
                 ),
@@ -271,7 +274,7 @@ class BookFriendsTab extends ConsumerWidget {
             Icon(
               Icons.forum_outlined,
               size: 64,
-              color: theme.secondaryTextColor,
+              color: const Color(0xFF3F51B5), // Indigo for community
             ),
             const SizedBox(height: 16),
             Text(

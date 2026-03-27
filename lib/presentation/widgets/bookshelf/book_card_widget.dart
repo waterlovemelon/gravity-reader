@@ -68,15 +68,17 @@ class BookCardWidget extends ConsumerWidget {
                           height: 16,
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? theme.primaryColor
+                                ? const Color(
+                                    0xFF4CAF50,
+                                  ) // Green for selection check state
                                 : Colors.white.withValues(alpha: 0.82),
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: isSelected
-                                  ? theme.primaryColor
-                                  : theme.secondaryTextColor.withValues(
-                                      alpha: 0.22,
-                                    ),
+                                  ? const Color(
+                                      0xFF4CAF50,
+                                    ) // Green for selected
+                                  : Colors.white.withValues(alpha: 0.82),
                             ),
                           ),
                           child: isSelected

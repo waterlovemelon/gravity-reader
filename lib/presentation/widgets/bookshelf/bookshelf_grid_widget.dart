@@ -40,7 +40,7 @@ class BookshelfGridWidget extends ConsumerWidget {
               Icon(
                 Icons.library_books_outlined,
                 size: 64,
-                color: theme.secondaryTextColor,
+                color: const Color(0xFF9C27B0), // Purple for books/library
               ),
               const SizedBox(height: 16),
               Text(

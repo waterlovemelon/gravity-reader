@@ -70,6 +70,9 @@ class ProfilePage extends ConsumerWidget {
                               en: '${data.rankedBooks.where((item) => item.readingTimeSeconds > 0).length}',
                             ),
                             icon: Icons.leaderboard_outlined,
+                            iconColor: const Color(
+                              0xFF4CAF50,
+                            ), // Green for achievements
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
@@ -92,6 +95,7 @@ class ProfilePage extends ConsumerWidget {
                               data.totalReadingTimeSeconds,
                             ),
                             icon: Icons.schedule_outlined,
+                            iconColor: const Color(0xFF009688), // Teal for time
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => const ReadingCollectionPage(
@@ -119,6 +123,9 @@ class ProfilePage extends ConsumerWidget {
                               en: '${data.inProgressBooks.length}',
                             ),
                             icon: Icons.menu_book_outlined,
+                            iconColor: const Color(
+                              0xFF2196F3,
+                            ), // Blue for reading
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => const ReadingCollectionPage(
@@ -142,6 +149,9 @@ class ProfilePage extends ConsumerWidget {
                               en: '${data.finishedBooks.length}',
                             ),
                             icon: Icons.task_alt_outlined,
+                            iconColor: const Color(
+                              0xFF4CAF50,
+                            ), // Green for finished/achievement
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => const ReadingCollectionPage(
@@ -165,6 +175,9 @@ class ProfilePage extends ConsumerWidget {
                               en: '${data.totalNoteCount}',
                             ),
                             icon: Icons.edit_note_outlined,
+                            iconColor: const Color(
+                              0xFF009688,
+                            ), // Teal for notes
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => const ReadingCollectionPage(
@@ -253,14 +266,7 @@ class _LoggedOutHero extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                theme.primaryColor.withValues(alpha: 0.18),
-                theme.cardBackgroundColor,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: theme.cardBackgroundColor,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
@@ -275,7 +281,7 @@ class _LoggedOutHero extends ConsumerWidget {
                 ),
                 child: Icon(
                   Icons.person_outline_rounded,
-                  color: theme.primaryColor,
+                  color: theme.textColor,
                 ),
               ),
               const SizedBox(width: 12),
@@ -308,7 +314,7 @@ class _LoggedOutHero extends ConsumerWidget {
               ),
               Icon(
                 Icons.chevron_right_rounded,
-                color: theme.secondaryTextColor,
+                color: const Color(0xFF757575), // Gray for neutral actions
                 size: 28,
               ),
             ],
@@ -422,6 +428,7 @@ class _SettingsRowTile extends ConsumerWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String? leadingText;
+  final Color iconColor;
 
   const _SettingsRowTile({
     required this.title,
@@ -429,6 +436,7 @@ class _SettingsRowTile extends ConsumerWidget {
     required this.icon,
     required this.onTap,
     this.leadingText,
+    this.iconColor = const Color(0xFFFF9800), // Default orange for settings
   });
 
   @override
@@ -447,10 +455,10 @@ class _SettingsRowTile extends ConsumerWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: theme.primaryColor.withValues(alpha: 0.12),
+                  color: iconColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: theme.primaryColor, size: 18),
+                child: Icon(icon, color: iconColor, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -485,6 +493,10 @@ class _SettingsRowTile extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: const Color(0xFF757575), // Gray for neutral actions
+                ),
               ],
               Icon(
                 Icons.chevron_right_rounded,
@@ -503,12 +515,14 @@ class _CompactMetricRow extends ConsumerWidget {
   final String value;
   final IconData icon;
   final VoidCallback onTap;
+  final Color iconColor;
 
   const _CompactMetricRow({
     required this.title,
     required this.value,
     required this.icon,
     required this.onTap,
+    this.iconColor = const Color(0xFF2196F3), // Default blue
   });
 
   @override
@@ -527,10 +541,10 @@ class _CompactMetricRow extends ConsumerWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: theme.primaryColor.withValues(alpha: 0.12),
+                  color: iconColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: theme.primaryColor, size: 18),
+                child: Icon(icon, color: iconColor, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -554,7 +568,7 @@ class _CompactMetricRow extends ConsumerWidget {
               const SizedBox(width: 6),
               Icon(
                 Icons.chevron_right_rounded,
-                color: theme.secondaryTextColor,
+                color: const Color(0xFF757575), // Gray for neutral actions
               ),
             ],
           ),

@@ -157,10 +157,12 @@ class _SectionHeader extends StatelessWidget {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: theme.primaryColor.withValues(alpha: 0.12),
+            color: const Color(
+              0xFFFF9800,
+            ).withValues(alpha: 0.12), // Orange for settings
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: theme.primaryColor, size: 18),
+          child: Icon(icon, color: const Color(0xFFFF9800), size: 18), // Orange
         ),
         const SizedBox(width: 12),
         Expanded(
