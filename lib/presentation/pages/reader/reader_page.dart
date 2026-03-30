@@ -24,6 +24,7 @@ import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/pages/reader/audiobook_page_redesign.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReaderPage extends ConsumerStatefulWidget {
@@ -436,6 +437,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       'reader_background_brightness_v1';
   static const String _prefOneHandMode = 'reader_one_hand_mode_v1';
   static const String _prefEdgeSwipeExit = 'reader_edge_swipe_exit_v1';
+  static const String _prefBrightnessFollowSystem =
+      'reader_brightness_follow_system_v1';
   // 禁用 keepPage 以避免 page storage 延迟
   late PageController _pageController;
   final int _fallbackPages = 100;
@@ -1721,6 +1724,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             : CupertinoIcons.sun_max_fill,
                         active: true,
                         onTap: _toggleQuickBrightnessTheme,
+                        onLongPress: () => _showQuickBrightnessSlider(),
                       ),
                       _toolButton(
                         icon: CupertinoIcons.slider_horizontal_3,
@@ -1822,16 +1826,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Widget _toolButton({
     required IconData icon,
     required VoidCallback onTap,
+    VoidCallback? onLongPress,
     bool active = false,
   }) {
     final baseColor = _textColor;
-    return IconButton(
-      visualDensity: VisualDensity.compact,
-      iconSize: 24,
-      splashRadius: 22,
-      color: active ? baseColor : baseColor.withOpacity(0.82),
-      onPressed: onTap,
-      icon: Icon(icon, weight: 50, grade: -25, opticalSize: 22),
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        iconSize: 24,
+        splashRadius: 22,
+        color: active ? baseColor : baseColor.withOpacity(0.82),
+        onPressed: onTap,
+        icon: Icon(icon, weight: 50, grade: -25, opticalSize: 22),
+      ),
     );
   }
 
@@ -2028,6 +2036,175 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       case _ReaderBackgroundImageFit.cover:
         return _text(zh: '填充', en: 'Fill');
     }
+  }
+
+  Future<void> _showQuickBrightnessSlider() async {
+    HapticFeedback.mediumImpact();
+    setState(() => _showControls = false);
+
+    double current = 0.5;
+    final prefs = await SharedPreferences.getInstance();
+    bool followSystem = prefs.getBool(_prefBrightnessFollowSystem) ?? false;
+
+    try {
+      current = followSystem
+          ? await ScreenBrightness.instance.system
+          : await ScreenBrightness.instance.application;
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    StreamSubscription<double>? brightnessSub;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            void startListening() {
+              brightnessSub?.cancel();
+              brightnessSub = ScreenBrightness
+                  .instance
+                  .onSystemScreenBrightnessChanged
+                  .listen((v) {
+                    current = v;
+                    setModalState(() {});
+                  });
+            }
+
+            void stopListening() {
+              brightnessSub?.cancel();
+              brightnessSub = null;
+            }
+
+            if (followSystem && brightnessSub == null) {
+              startListening();
+            }
+
+            return Container(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              decoration: BoxDecoration(
+                color: _controlSurfaceColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _textColor.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(
+                          CupertinoIcons.sun_min,
+                          size: 20,
+                          color: _textColor.withOpacity(0.5),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 4,
+                              activeTrackColor: _textColor.withOpacity(0.5),
+                              inactiveTrackColor: _textColor.withOpacity(0.12),
+                              thumbColor: _textColor,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 8,
+                              ),
+                              overlayColor: _textColor.withOpacity(0.08),
+                            ),
+                            child: Slider(
+                              value: current,
+                              onChanged: (v) {
+                                current = v;
+                                if (followSystem) {
+                                  followSystem = false;
+                                  prefs.setBool(
+                                    _prefBrightnessFollowSystem,
+                                    false,
+                                  );
+                                  stopListening();
+                                }
+                                setModalState(() {});
+                                ScreenBrightness.instance.setScreenBrightness(
+                                  v,
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(
+                          CupertinoIcons.sun_max_fill,
+                          size: 20,
+                          color: _textColor.withOpacity(0.5),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: _textColor.withOpacity(0.08)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            _text(zh: '跟随系统', en: 'Follow System'),
+                            style: TextStyle(fontSize: 14, color: _textColor),
+                          ),
+                          const Spacer(),
+                          CupertinoSwitch(
+                            value: followSystem,
+                            activeTrackColor: const Color(0xFF3B82F6),
+                            onChanged: (v) async {
+                              followSystem = v;
+                              prefs.setBool(_prefBrightnessFollowSystem, v);
+                              setModalState(() {});
+                              if (v) {
+                                ScreenBrightness.instance
+                                    .resetScreenBrightness();
+                                try {
+                                  current =
+                                      await ScreenBrightness.instance.system;
+                                } catch (_) {}
+                                startListening();
+                                setModalState(() {});
+                              } else {
+                                stopListening();
+                                ScreenBrightness.instance.setScreenBrightness(
+                                  current,
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      brightnessSub?.cancel();
+    });
   }
 
   Future<void> _showSettingsPanel() async {
