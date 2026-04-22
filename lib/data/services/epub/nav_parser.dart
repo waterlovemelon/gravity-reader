@@ -3,6 +3,8 @@ import 'package:myreader/data/services/epub/epub_package.dart';
 import 'package:xml/xml.dart';
 
 class NavParser {
+  const NavParser();
+
   List<EpubTocEntry> parseNav({
     required String navXml,
     required String navPath,

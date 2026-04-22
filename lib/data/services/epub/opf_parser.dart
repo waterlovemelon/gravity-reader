@@ -3,6 +3,8 @@ import 'package:myreader/data/services/epub/epub_package.dart';
 import 'package:xml/xml.dart';
 
 class OpfParser {
+  const OpfParser();
+
   EpubPackage parse({required String opfXml, required String packagePath}) {
     final document = XmlDocument.parse(opfXml);
     final metadataNode = _firstElementByLocalName(document, 'metadata');

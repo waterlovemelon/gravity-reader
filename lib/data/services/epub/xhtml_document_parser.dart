@@ -7,6 +7,8 @@ import 'package:xml/xml.dart';
 typedef ImageDimensionLookup = Map<String, ({double width, double height})>;
 
 class XhtmlDocumentParser {
+  const XhtmlDocumentParser();
+
   ChapterDocument parse({
     required int spineIndex,
     required String chapterId,

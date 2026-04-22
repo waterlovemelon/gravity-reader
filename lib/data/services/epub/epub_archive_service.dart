@@ -5,6 +5,8 @@ import 'package:archive/archive.dart';
 import 'package:xml/xml.dart';
 
 class EpubArchiveService {
+  const EpubArchiveService();
+
   Future<Map<String, List<int>>> readEntries(String epubPath) async {
     final bytes = await File(epubPath).readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
