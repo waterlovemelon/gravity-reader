@@ -40,6 +40,8 @@ dependencies:
   
   # Screen brightness control
   screen_brightness: ^2.1.3
+  archive: ^3.6.1
+  xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:
