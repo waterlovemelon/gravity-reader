@@ -40,6 +40,39 @@ void main() {
     expect(result.pages[1].segments.first.blockIndex, 1);
     expect(result.pages[1].segments.first.startInlineOffset, greaterThan(0));
   });
+
+  test('paginator reserves rendered spacing between blocks on a page', () {
+    final chapter = ChapterDocument(
+      spineIndex: 0,
+      id: 'chapter-1',
+      href: 'OPS/Text/chapter1.xhtml',
+      title: '第一章',
+      blocks: const [
+        BlockNode.paragraph(children: [InlineNode.text('first')]),
+        BlockNode.paragraph(children: [InlineNode.text('second')]),
+      ],
+    );
+
+    final result =
+        EpubPaginator(
+          measurer: const FixedHeightLayoutMeasurer(height: 50),
+        ).paginate(
+          chapter: chapter,
+          settings: const PaginationSettings(
+            viewportWidth: 390,
+            viewportHeight: 100,
+            contentPaddingTop: 0,
+            contentPaddingBottom: 0,
+            contentPaddingHorizontal: 24,
+            fontSize: 20,
+            lineHeight: 1.8,
+          ),
+        );
+
+    expect(result.pages, hasLength(2));
+    expect(result.pages.first.segments, hasLength(1));
+    expect(result.pages.last.segments.single.blockIndex, 1);
+  });
 }
 
 class FakeLayoutMeasurer implements LayoutMeasurer {
@@ -67,6 +100,35 @@ class FakeLayoutMeasurer implements LayoutMeasurer {
       consumedHeight: remainingHeight >= 220 ? 220 : remainingHeight,
       endInlineOffset: endOffset,
       fitsWholeBlock: endOffset >= totalLength,
+      segmentType: PageSegmentType.paragraph,
+    );
+  }
+}
+
+class FixedHeightLayoutMeasurer implements LayoutMeasurer {
+  final double height;
+
+  const FixedHeightLayoutMeasurer({required this.height});
+
+  @override
+  BlockLayoutMeasure measure({
+    required BlockNode block,
+    required PaginationSettings settings,
+    required double remainingHeight,
+    required int startInlineOffset,
+  }) {
+    if (remainingHeight < height) {
+      return const BlockLayoutMeasure(
+        consumedHeight: 0,
+        endInlineOffset: 0,
+        fitsWholeBlock: false,
+        segmentType: PageSegmentType.paragraph,
+      );
+    }
+    return BlockLayoutMeasure(
+      consumedHeight: height,
+      endInlineOffset: block.children.map((child) => child.text).join().length,
+      fitsWholeBlock: true,
       segmentType: PageSegmentType.paragraph,
     );
   }

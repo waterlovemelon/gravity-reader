@@ -1,3 +1,4 @@
+import 'package:myreader/data/services/reader_pagination/epub_block_spacing.dart';
 import 'package:myreader/data/services/reader_pagination/layout_measurer.dart';
 import 'package:myreader/data/services/reader_pagination/page_layout_model.dart';
 import 'package:myreader/data/services/reader_pagination/pagination_settings.dart';
@@ -22,14 +23,46 @@ class EpubPaginator {
       var inlineOffset = 0;
 
       while (true) {
+        final spacingBefore = currentSegments.isEmpty
+            ? 0.0
+            : epubSpacingAfter(
+                chapter.blocks[currentSegments.last.blockIndex],
+                settings.fontSize,
+              );
+        final measurableHeight = remainingHeight - spacingBefore;
+        if (measurableHeight <= 0 && currentSegments.isNotEmpty) {
+          pages.add(
+            PageLayout(
+              pageIndex: pageIndex++,
+              chapterIndex: chapter.spineIndex,
+              segments: List<PageSegment>.unmodifiable(currentSegments),
+            ),
+          );
+          currentSegments.clear();
+          remainingHeight = settings.contentHeight;
+          continue;
+        }
+
         final measure = measurer.measure(
           block: block,
           settings: settings,
-          remainingHeight: remainingHeight,
+          remainingHeight: measurableHeight,
           startInlineOffset: inlineOffset,
         );
 
         if (measure.consumedHeight <= 0) {
+          if (currentSegments.isNotEmpty) {
+            pages.add(
+              PageLayout(
+                pageIndex: pageIndex++,
+                chapterIndex: chapter.spineIndex,
+                segments: List<PageSegment>.unmodifiable(currentSegments),
+              ),
+            );
+            currentSegments.clear();
+            remainingHeight = settings.contentHeight;
+            continue;
+          }
           throw StateError(
             'Layout measurer returned non-positive height for block $blockIndex.',
           );
@@ -43,7 +76,7 @@ class EpubPaginator {
             segmentType: measure.segmentType,
           ),
         );
-        remainingHeight -= measure.consumedHeight;
+        remainingHeight -= spacingBefore + measure.consumedHeight;
 
         if (measure.fitsWholeBlock) {
           break;

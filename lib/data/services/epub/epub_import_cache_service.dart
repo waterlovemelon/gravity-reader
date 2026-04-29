@@ -9,6 +9,7 @@ import 'package:myreader/data/services/epub/xhtml_document_parser.dart';
 import 'package:myreader/domain/entities/reader_document/book_document.dart';
 import 'package:myreader/domain/entities/reader_document/chapter_document.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:xml/xml.dart';
 
 class EpubImportCacheData {
   final EpubPackage package;
@@ -89,6 +90,14 @@ class EpubImportCacheService {
       if (manifestItem == null || !manifestItem.mediaType.contains('xhtml')) {
         continue;
       }
+      final xhtml = _archiveService.readUtf8(entries, manifestItem.href);
+      if (_isSpineTocDocument(
+        manifestItem: manifestItem,
+        xhtml: xhtml,
+        spineIndex: spineItem.index,
+      )) {
+        continue;
+      }
       chapters.add(
         _xhtmlParser.parse(
           spineIndex: spineItem.index,
@@ -99,7 +108,7 @@ class EpubImportCacheService {
             toc: toc,
             defaultTitle: manifestItem.id,
           ),
-          xhtml: _archiveService.readUtf8(entries, manifestItem.href),
+          xhtml: xhtml,
           imageDimensions: const {},
         ),
       );
@@ -204,5 +213,93 @@ class EpubImportCacheService {
       }
     }
     return defaultTitle;
+  }
+
+  bool _isSpineTocDocument({
+    required EpubManifestItem manifestItem,
+    required String xhtml,
+    required int spineIndex,
+  }) {
+    if (manifestItem.properties.contains('nav')) {
+      return true;
+    }
+    if (spineIndex > 5) {
+      return false;
+    }
+
+    final href = manifestItem.href.toLowerCase();
+    final id = manifestItem.id.toLowerCase();
+    final nameLooksLikeToc =
+        href.contains('toc') ||
+        href.contains('nav') ||
+        href.contains('contents') ||
+        id.contains('toc') ||
+        id.contains('nav') ||
+        id.contains('contents');
+    try {
+      final document = XmlDocument.parse(xhtml);
+      final text = document.rootElement.innerText.toLowerCase();
+      final links = document.descendants
+          .whereType<XmlElement>()
+          .where((element) => element.name.local == 'a')
+          .length;
+      return _looksLikeNavigationPage(
+        text: text,
+        links: links,
+        requireTocName: !nameLooksLikeToc,
+      );
+    } catch (_) {
+      final lowered = xhtml.toLowerCase();
+      final links = RegExp(
+        '<a\\s',
+        caseSensitive: false,
+      ).allMatches(xhtml).length;
+      return _looksLikeNavigationPage(
+        text: lowered,
+        links: links,
+        requireTocName: !nameLooksLikeToc,
+      );
+    }
+  }
+
+  bool _looksLikeNavigationPage({
+    required String text,
+    required int links,
+    required bool requireTocName,
+  }) {
+    if (links < 2) {
+      return false;
+    }
+
+    final hasTocName =
+        text.contains('目录') ||
+        text.contains('contents') ||
+        text.contains('table of contents');
+    if (hasTocName && !requireTocName) {
+      return true;
+    }
+
+    final chapterLinkLabels = RegExp(
+      r'第\s*[0-9零一二三四五六七八九十百千万〇两]+\s*[章节卷部篇回集]|chapter\s+[0-9ivxlcdm]+',
+      caseSensitive: false,
+    ).allMatches(text).length;
+    if (hasTocName && chapterLinkLabels >= 2) {
+      return true;
+    }
+
+    final navigationTerms = <String>[
+      'landmarks',
+      'table of contents',
+      'contents',
+      'cover',
+      '封面',
+      'title page',
+      'copyright',
+      '版权',
+    ];
+    final matchedTerms = navigationTerms
+        .where((term) => text.contains(term))
+        .length;
+    return hasTocName && matchedTerms >= 2;
   }
 }

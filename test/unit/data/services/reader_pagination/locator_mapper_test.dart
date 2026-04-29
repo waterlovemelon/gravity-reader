@@ -43,4 +43,42 @@ void main() {
     expect(LocatorMapper.locatorForPageStart(pages[1]).blockIndex, 1);
     expect(LocatorMapper.locatorForPageStart(pages[1]).inlineOffset, 5);
   });
+
+  test('leading locator at split block boundary resolves to next page', () {
+    const pages = [
+      PageLayout(
+        pageIndex: 0,
+        chapterIndex: 0,
+        segments: [
+          PageSegment(
+            blockIndex: 0,
+            startInlineOffset: 0,
+            endInlineOffset: 100,
+            segmentType: PageSegmentType.paragraph,
+          ),
+        ],
+      ),
+      PageLayout(
+        pageIndex: 1,
+        chapterIndex: 0,
+        segments: [
+          PageSegment(
+            blockIndex: 0,
+            startInlineOffset: 100,
+            endInlineOffset: 200,
+            segmentType: PageSegmentType.paragraph,
+          ),
+        ],
+      ),
+    ];
+
+    const locator = ReaderLocator(
+      spineIndex: 0,
+      blockIndex: 0,
+      inlineOffset: 100,
+      bias: ReaderLocatorBias.leading,
+    );
+
+    expect(LocatorMapper.pageIndexFor(locator: locator, pages: pages), 1);
+  });
 }

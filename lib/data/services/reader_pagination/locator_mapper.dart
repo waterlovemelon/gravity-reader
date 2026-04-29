@@ -9,9 +9,7 @@ class LocatorMapper {
     for (final page in pages) {
       for (final segment in page.segments) {
         final sameBlock = segment.blockIndex == locator.blockIndex;
-        final containsOffset =
-            locator.inlineOffset >= segment.startInlineOffset &&
-            locator.inlineOffset <= segment.endInlineOffset;
+        final containsOffset = _containsOffset(locator, segment);
         if (sameBlock && containsOffset) {
           return page.pageIndex;
         }
@@ -28,5 +26,20 @@ class LocatorMapper {
       inlineOffset: first.startInlineOffset,
       bias: ReaderLocatorBias.leading,
     );
+  }
+
+  static bool _containsOffset(ReaderLocator locator, PageSegment segment) {
+    if (segment.startInlineOffset == segment.endInlineOffset) {
+      return locator.inlineOffset == segment.startInlineOffset;
+    }
+
+    switch (locator.bias) {
+      case ReaderLocatorBias.leading:
+        return locator.inlineOffset >= segment.startInlineOffset &&
+            locator.inlineOffset < segment.endInlineOffset;
+      case ReaderLocatorBias.trailing:
+        return locator.inlineOffset > segment.startInlineOffset &&
+            locator.inlineOffset <= segment.endInlineOffset;
+    }
   }
 }

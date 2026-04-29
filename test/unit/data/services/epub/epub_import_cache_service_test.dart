@@ -26,6 +26,61 @@ void main() {
     expect(restored?.package.toc.first.href, 'OPS/Text/chapter1.xhtml');
   });
 
+  test('skips spine nav document while keeping package toc entries', () async {
+    final epubPath = await writeEpubFixtureWithSpineNavPage();
+    final tempDir = await Directory.systemTemp.createTemp(
+      'epub_spine_nav_test',
+    );
+    final service = EpubImportCacheService(appDirProvider: () async => tempDir);
+
+    final data = await service.prepare(bookId: 'book-1', epubPath: epubPath);
+
+    expect(data.package.toc.map((entry) => entry.title), ['第一章', '第二章']);
+    expect(data.document.chapters.map((chapter) => chapter.href), [
+      'OPS/Text/chapter1.xhtml',
+      'OPS/Text/chapter2.xhtml',
+    ]);
+  });
+
+  test('skips early spine landmarks page with opaque manifest id', () async {
+    final epubPath = await writeEpubFixtureWithSpineLandmarksPage();
+    final tempDir = await Directory.systemTemp.createTemp(
+      'epub_spine_landmarks_test',
+    );
+    final service = EpubImportCacheService(appDirProvider: () async => tempDir);
+
+    final data = await service.prepare(bookId: 'book-1', epubPath: epubPath);
+
+    expect(data.document.chapters.map((chapter) => chapter.id), [
+      'chapter-1',
+      'chapter-2',
+    ]);
+    expect(data.document.chapters.map((chapter) => chapter.title), [
+      '第一章',
+      '第二章',
+    ]);
+  });
+
+  test('skips early spine contents page with opaque manifest id', () async {
+    final epubPath = await writeEpubFixtureWithSpineContentsPage();
+    final tempDir = await Directory.systemTemp.createTemp(
+      'epub_spine_contents_test',
+    );
+    final service = EpubImportCacheService(appDirProvider: () async => tempDir);
+
+    final data = await service.prepare(bookId: 'book-1', epubPath: epubPath);
+
+    expect(data.package.toc.map((entry) => entry.title), ['第一章', '第二章']);
+    expect(data.document.chapters.map((chapter) => chapter.href), [
+      'OPS/Text/chapter1.xhtml',
+      'OPS/Text/chapter2.xhtml',
+    ]);
+    expect(data.document.chapters.map((chapter) => chapter.title), [
+      '第一章',
+      '第二章',
+    ]);
+  });
+
   test(
     'extracts cover bytes into destination path when cover metadata exists',
     () async {
