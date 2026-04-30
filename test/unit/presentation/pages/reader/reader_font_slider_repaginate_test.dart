@@ -6,19 +6,22 @@ void main() {
   test('font size slider repaginates only after drag ends', () {
     final source = File(
       'lib/presentation/pages/reader/reader_page.dart',
-    ).readAsStringSync();
+    ).readAsStringSync().replaceAll('\r\n', '\n');
 
-    final sliderStart = source.indexOf('value: fontSize.toDouble()');
-    expect(sliderStart, isNonNegative);
+    final smallScaleMarkStart = source.indexOf(
+      "_buildScaleMark(\n                                                label: 'A',\n                                                small: true,",
+    );
+    expect(smallScaleMarkStart, isNonNegative);
 
     final sliderEnd = source.indexOf(
       '_buildScaleMark(\n                                                label: \'A\',\n                                                small: false,',
-      sliderStart,
+      smallScaleMarkStart,
     );
     expect(sliderEnd, isNonNegative);
 
-    final fontSliderSource = source.substring(sliderStart, sliderEnd);
+    final fontSliderSource = source.substring(smallScaleMarkStart, sliderEnd);
 
+    expect(fontSliderSource, contains('value: fontSize.toDouble()'));
     expect(fontSliderSource, contains('onChangeEnd:'));
     expect(fontSliderSource, contains('_scheduleRepaginate();'));
 
