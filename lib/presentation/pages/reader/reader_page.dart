@@ -18,6 +18,7 @@ import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/core/utils/locale_text.dart';
+import 'package:myreader/core/utils/managed_file_paths.dart';
 import 'package:myreader/data/services/epub/epub_archive_service.dart';
 import 'package:myreader/data/services/epub/epub_import_cache_service.dart';
 import 'package:myreader/data/services/epub/epub_package.dart';
@@ -4557,11 +4558,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
 
     try {
+      final resolvedEpubFile = await resolveManagedFile(
+        book.epubPath,
+        managedFolderName: 'books',
+      );
+      final resolvedEpubPath = resolvedEpubFile.path;
       var cacheData = await _epubImportCacheService.read(book.id);
       if (cacheData == null) {
         cacheData = await _epubImportCacheService.prepare(
           bookId: book.id,
-          epubPath: book.epubPath,
+          epubPath: resolvedEpubPath,
         );
         await _epubImportCacheService.write(bookId: book.id, data: cacheData);
       }
@@ -4570,11 +4576,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
       final resolvedCacheData = cacheData;
 
-      final sourceFileExists = await File(book.epubPath).exists();
+      final sourceFileExists = await resolvedEpubFile.exists();
       final resources = sourceFileExists
           ? _collectEpubResourceBytes(
               document: resolvedCacheData.document,
-              entries: await _epubArchiveService.readEntries(book.epubPath),
+              entries: await _epubArchiveService.readEntries(resolvedEpubPath),
             )
           : <String, Uint8List>{};
       final progress = await ref

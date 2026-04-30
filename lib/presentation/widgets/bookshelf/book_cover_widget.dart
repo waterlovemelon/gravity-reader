@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:myreader/core/constants/placeholder_cover_assets.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
+import 'package:myreader/core/utils/managed_file_paths.dart';
 import 'package:myreader/domain/entities/book.dart';
 
 class BookCoverWidget extends ConsumerWidget {
@@ -70,17 +71,23 @@ class BookCoverImage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (book.coverPath != null && book.coverPath!.isNotEmpty) {
-      final coverFile = _resolveCoverFile(book.coverPath);
-      if (coverFile.existsSync()) {
-        return Image.file(
-          coverFile,
-          fit: BoxFit.cover,
-          width: width,
-          height: height,
-          errorBuilder: (context, error, stackTrace) =>
-              _buildPlaceholder(context, ref),
-        );
-      }
+      return FutureBuilder<File>(
+        future: resolveManagedFile(book.coverPath, managedFolderName: 'covers'),
+        builder: (context, snapshot) {
+          final coverFile = snapshot.data;
+          if (coverFile != null && coverFile.existsSync()) {
+            return Image.file(
+              coverFile,
+              fit: BoxFit.cover,
+              width: width,
+              height: height,
+              errorBuilder: (context, error, stackTrace) =>
+                  _buildPlaceholder(context, ref),
+            );
+          }
+          return _buildPlaceholder(context, ref);
+        },
+      );
     }
     return _buildPlaceholder(context, ref);
   }
@@ -111,19 +118,5 @@ class BookCoverImage extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  File _resolveCoverFile(String? rawPath) {
-    final trimmed = rawPath?.trim() ?? '';
-    if (trimmed.startsWith('file://')) {
-      final uri = Uri.tryParse(trimmed);
-      if (uri != null) {
-        final path = uri.toFilePath();
-        if (path.isNotEmpty) {
-          return File(path);
-        }
-      }
-    }
-    return File(trimmed);
   }
 }

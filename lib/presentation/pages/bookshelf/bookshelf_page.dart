@@ -20,6 +20,7 @@ import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/core/utils/locale_text.dart';
+import 'package:myreader/core/utils/managed_file_paths.dart';
 import 'package:myreader/data/services/epub/epub_import_cache_service.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
@@ -1194,12 +1195,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       return;
     }
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final managedDirPath = '${appDir.path}/$managedFolderName/';
-      if (!path.contains(managedDirPath)) {
+      if (!looksLikeManagedFilePath(path, managedFolderName)) {
         return;
       }
-      final file = File(path);
+      final file = await resolveManagedFile(
+        path,
+        managedFolderName: managedFolderName,
+      );
       if (await file.exists()) {
         await file.delete();
       }

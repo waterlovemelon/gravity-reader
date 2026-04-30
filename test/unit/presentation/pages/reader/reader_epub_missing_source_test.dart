@@ -8,7 +8,9 @@ void main() {
       'lib/presentation/pages/reader/reader_page.dart',
     ).readAsStringSync();
 
-    expect(source, contains('File(book.epubPath).exists()'));
+    expect(source, contains('resolveManagedFile('));
+    expect(source, contains("managedFolderName: 'books'"));
+    expect(source, contains('resolvedEpubFile.exists()'));
     expect(source, contains('_collectEpubResourceBytes('));
     expect(source, contains('<String, Uint8List>{}'));
   });
