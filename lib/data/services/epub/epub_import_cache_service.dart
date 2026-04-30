@@ -75,6 +75,7 @@ class EpubImportCacheService {
   Future<EpubImportCacheData> prepare({
     required String bookId,
     required String epubPath,
+    String? displayTitle,
   }) async {
     final entries = await _archiveService.readEntries(epubPath);
     final packagePath = _archiveService.readContainerPath(entries);
@@ -91,6 +92,14 @@ class EpubImportCacheService {
         continue;
       }
       final xhtml = _archiveService.readUtf8(entries, manifestItem.href);
+      final isCoverSpineDocument = _isCoverSpineDocument(
+        manifestItem: manifestItem,
+        xhtml: xhtml,
+        package: parsedPackage,
+      );
+      if (!spineItem.isLinear && !isCoverSpineDocument) {
+        continue;
+      }
       if (_isSpineTocDocument(
         manifestItem: manifestItem,
         xhtml: xhtml,
@@ -106,7 +115,12 @@ class EpubImportCacheService {
           fallbackTitle: _fallbackTitleFor(
             href: manifestItem.href,
             toc: toc,
-            defaultTitle: manifestItem.id,
+            defaultTitle: isCoverSpineDocument
+                ? ''
+                : toc.isEmpty
+                ? manifestItem.id
+                : '',
+            forceDefaultTitle: isCoverSpineDocument,
           ),
           xhtml: xhtml,
           imageDimensions: const {},
@@ -120,14 +134,20 @@ class EpubImportCacheService {
       spineItems: parsedPackage.spineItems,
       toc: toc,
       packagePath: parsedPackage.packagePath,
+      spineTocId: parsedPackage.spineTocId,
     );
 
     return EpubImportCacheData(
       package: package,
       document: BookDocument(
         bookId: bookId,
-        title: package.metadata.title,
+        title: _displayTitleFor(
+          epubPath: epubPath,
+          explicitTitle: displayTitle,
+          metadataTitle: package.metadata.title,
+        ),
         author: package.metadata.author,
+        language: package.metadata.language,
         chapters: List<ChapterDocument>.unmodifiable(chapters),
       ),
     );
@@ -199,6 +219,27 @@ class EpubImportCacheService {
         navPath: item.href,
       );
     }
+
+    final tocId = package.spineTocId;
+    if (tocId != null && tocId.isNotEmpty) {
+      final tocItem = package.manifestItems[tocId];
+      if (tocItem != null) {
+        return _navParser.parseNcx(
+          ncxXml: _archiveService.readUtf8(entries, tocItem.href),
+          ncxPath: tocItem.href,
+        );
+      }
+    }
+
+    for (final item in package.manifestItems.values) {
+      if (item.mediaType == 'application/x-dtbncx+xml' ||
+          item.href.toLowerCase().endsWith('.ncx')) {
+        return _navParser.parseNcx(
+          ncxXml: _archiveService.readUtf8(entries, item.href),
+          ncxPath: item.href,
+        );
+      }
+    }
     return const [];
   }
 
@@ -206,13 +247,86 @@ class EpubImportCacheService {
     required String href,
     required List<EpubTocEntry> toc,
     required String defaultTitle,
+    bool forceDefaultTitle = false,
   }) {
+    if (forceDefaultTitle) {
+      return defaultTitle;
+    }
+    final normalizedHref = _normalizeHref(href);
     for (final entry in toc) {
-      if (entry.href == href) {
+      if (_normalizeHref(entry.href) == normalizedHref) {
         return entry.title;
       }
     }
     return defaultTitle;
+  }
+
+  String _normalizeHref(String href) => href.split('#').first;
+
+  String _displayTitleFor({
+    required String epubPath,
+    required String? explicitTitle,
+    required String metadataTitle,
+  }) {
+    final trimmedExplicit = explicitTitle?.trim();
+    if (trimmedExplicit != null && trimmedExplicit.isNotEmpty) {
+      return trimmedExplicit;
+    }
+
+    return metadataTitle;
+  }
+
+  bool _isCoverSpineDocument({
+    required EpubManifestItem manifestItem,
+    required String xhtml,
+    required EpubPackage package,
+  }) {
+    final coverItem = package.metadata.coverId == null
+        ? null
+        : package.manifestItems[package.metadata.coverId!];
+    final href = manifestItem.href.toLowerCase();
+    final id = manifestItem.id.toLowerCase();
+    if (id.contains('cover') ||
+        href.contains('cover') ||
+        href.contains('titlepage')) {
+      return true;
+    }
+    if (coverItem == null) {
+      return false;
+    }
+
+    try {
+      final document = XmlDocument.parse(xhtml);
+      for (final image in document.descendants.whereType<XmlElement>()) {
+        if (image.name.local != 'img' && image.name.local != 'image') {
+          continue;
+        }
+        final src =
+            image.getAttribute('src') ?? _attributeByLocalName(image, 'href');
+        if (src == null || src.isEmpty) {
+          continue;
+        }
+        final resolvedSrc = _archiveService.resolvePath(
+          basePath: manifestItem.href,
+          relativePath: src,
+        );
+        if (_normalizeHref(resolvedSrc) == _normalizeHref(coverItem.href)) {
+          return true;
+        }
+      }
+    } catch (_) {
+      return false;
+    }
+    return false;
+  }
+
+  String? _attributeByLocalName(XmlElement element, String localName) {
+    for (final attribute in element.attributes) {
+      if (attribute.name.local == localName) {
+        return attribute.value;
+      }
+    }
+    return null;
   }
 
   bool _isSpineTocDocument({

@@ -51,4 +51,80 @@ void main() {
       expect(chapter.blocks[4].intrinsicHeight, 720);
     },
   );
+
+  test('parses an image nested inside a paragraph as an image block', () {
+    const xhtml = '''
+    <html xmlns="http://www.w3.org/1999/xhtml">
+      <body>
+        <h1>第一章</h1>
+        <p class="center"><img src="../Images/scene.jpg" alt="scene" /></p>
+      </body>
+    </html>
+    ''';
+
+    final chapter = XhtmlDocumentParser().parse(
+      spineIndex: 0,
+      chapterId: 'chapter-1',
+      chapterHref: 'OPS/Text/chapter1.xhtml',
+      fallbackTitle: '第一章',
+      xhtml: xhtml,
+      imageDimensions: const {},
+    );
+
+    expect(chapter.blocks.map((block) => block.type), [
+      BlockNodeType.heading,
+      BlockNodeType.image,
+    ]);
+    expect(chapter.blocks[1].src, 'OPS/Images/scene.jpg');
+  });
+
+  test('preserves heading line breaks in chapter title', () {
+    const xhtml = '''
+    <html xmlns="http://www.w3.org/1999/xhtml">
+      <body>
+        <h1><span>楔子</span><br />张天师祈禳瘟疫<br />洪太尉误走妖魔</h1>
+        <p>正文。</p>
+      </body>
+    </html>
+    ''';
+
+    final chapter = XhtmlDocumentParser().parse(
+      spineIndex: 0,
+      chapterId: 'chapter-1',
+      chapterHref: 'text/part0006.html',
+      fallbackTitle: '楔子 张天师祈禳瘟疫 洪太尉误走妖魔',
+      xhtml: xhtml,
+      imageDimensions: const {},
+    );
+
+    expect(chapter.title, '楔子\n张天师祈禳瘟疫\n洪太尉误走妖魔');
+  });
+
+  test('parses svg cover image as an image block', () {
+    const xhtml = '''
+    <html xmlns="http://www.w3.org/1999/xhtml">
+      <body>
+        <div>
+          <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+            <image width="932" height="1388" xlink:href="cover.jpeg" />
+          </svg>
+        </div>
+      </body>
+    </html>
+    ''';
+
+    final chapter = XhtmlDocumentParser().parse(
+      spineIndex: 0,
+      chapterId: 'titlepage',
+      chapterHref: 'titlepage.xhtml',
+      fallbackTitle: 'titlepage',
+      xhtml: xhtml,
+      imageDimensions: const {},
+    );
+
+    expect(chapter.blocks.map((block) => block.type), [BlockNodeType.image]);
+    expect(chapter.blocks.single.src, 'cover.jpeg');
+    expect(chapter.blocks.single.intrinsicWidth, 932);
+    expect(chapter.blocks.single.intrinsicHeight, 1388);
+  });
 }

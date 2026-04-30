@@ -498,6 +498,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   ReaderLocator? _currentEpubLocator;
   bool _showEpubOpeningView = false;
   Map<String, Uint8List> _epubResourceBytes = const {};
+  String? _epubBookLanguage;
   int? _lastPageTurnStart; // 用于追踪翻页延迟
 
   Timer? _progressSaveDebounce;
@@ -1632,6 +1633,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       textStrutStyle: _contentStrutStyle,
       imageBytesByPath: _epubResourceBytes,
       imageMaxHeight: _contentMaxHeight * 0.45,
+      bookTitle: book.title,
+      bookAuthor: book.author,
+      bookLanguage: _epubBookLanguage,
     );
   }
 
@@ -4644,6 +4648,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         _currentPage = safeInitialPage;
         _currentEpubLocator = initialLocator;
         _epubResourceBytes = resources;
+        _epubBookLanguage =
+            resolvedCacheData.document.language ??
+            resolvedCacheData.package.metadata.language;
         _loadedEpubPath = book.epubPath;
         _isLoadingEpub = false;
         _showEpubOpeningView = false;

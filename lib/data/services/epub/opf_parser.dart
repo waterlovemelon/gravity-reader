@@ -44,13 +44,20 @@ class OpfParser {
       if (idref == null || idref.isEmpty) {
         continue;
       }
-      spineItems.add(EpubSpineItem(idref: idref, index: spineItems.length));
+      spineItems.add(
+        EpubSpineItem(
+          idref: idref,
+          index: spineItems.length,
+          isLinear: entry.getAttribute('linear') != 'no',
+        ),
+      );
     }
 
     return EpubPackage(
       metadata: EpubMetadata(
         title: _firstTextByLocalName(metadataNode, 'title') ?? 'Untitled',
         author: _firstTextByLocalName(metadataNode, 'creator'),
+        language: _firstTextByLocalName(metadataNode, 'language'),
         coverId: metadataNode.descendants
             .whereType<XmlElement>()
             .where((element) => element.name.local == 'meta')
@@ -64,6 +71,7 @@ class OpfParser {
       spineItems: List<EpubSpineItem>.unmodifiable(spineItems),
       toc: const [],
       packagePath: packagePath,
+      spineTocId: spineNode.getAttribute('toc'),
     );
   }
 

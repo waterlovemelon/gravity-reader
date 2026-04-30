@@ -18,6 +18,7 @@ void main() {
 
     expect(package.metadata.title, 'Fixture Book');
     expect(package.metadata.author, 'Fixture Author');
+    expect(package.metadata.language, 'zh');
     expect(package.metadata.coverId, 'cover-image');
     expect(package.spineItems.map((item) => item.idref).toList(), [
       'chapter-1',

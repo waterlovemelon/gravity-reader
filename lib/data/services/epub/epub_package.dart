@@ -1,20 +1,32 @@
 class EpubMetadata {
   final String title;
   final String? author;
+  final String? language;
   final String? coverId;
 
-  const EpubMetadata({required this.title, this.author, this.coverId});
+  const EpubMetadata({
+    required this.title,
+    this.author,
+    this.language,
+    this.coverId,
+  });
 
   factory EpubMetadata.fromJson(Map<String, dynamic> json) {
     return EpubMetadata(
       title: json['title'] as String,
       author: json['author'] as String?,
+      language: json['language'] as String?,
       coverId: json['coverId'] as String?,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'title': title, 'author': author, 'coverId': coverId};
+    return {
+      'title': title,
+      'author': author,
+      'language': language,
+      'coverId': coverId,
+    };
   }
 }
 
@@ -54,18 +66,24 @@ class EpubManifestItem {
 class EpubSpineItem {
   final String idref;
   final int index;
+  final bool isLinear;
 
-  const EpubSpineItem({required this.idref, required this.index});
+  const EpubSpineItem({
+    required this.idref,
+    required this.index,
+    this.isLinear = true,
+  });
 
   factory EpubSpineItem.fromJson(Map<String, dynamic> json) {
     return EpubSpineItem(
       idref: json['idref'] as String,
       index: json['index'] as int,
+      isLinear: json['isLinear'] as bool? ?? true,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'idref': idref, 'index': index};
+    return {'idref': idref, 'index': index, 'isLinear': isLinear};
   }
 }
 
@@ -93,6 +111,7 @@ class EpubPackage {
   final List<EpubSpineItem> spineItems;
   final List<EpubTocEntry> toc;
   final String packagePath;
+  final String? spineTocId;
 
   const EpubPackage({
     required this.metadata,
@@ -100,6 +119,7 @@ class EpubPackage {
     required this.spineItems,
     required this.toc,
     required this.packagePath,
+    this.spineTocId,
   });
 
   factory EpubPackage.fromJson(Map<String, dynamic> json) {
@@ -124,6 +144,7 @@ class EpubPackage {
           .map(EpubTocEntry.fromJson)
           .toList(growable: false),
       packagePath: json['packagePath'] as String,
+      spineTocId: json['spineTocId'] as String?,
     );
   }
 
@@ -137,6 +158,7 @@ class EpubPackage {
       'spineItems': spineItems.map((item) => item.toJson()).toList(),
       'toc': toc.map((entry) => entry.toJson()).toList(),
       'packagePath': packagePath,
+      'spineTocId': spineTocId,
     };
   }
 }

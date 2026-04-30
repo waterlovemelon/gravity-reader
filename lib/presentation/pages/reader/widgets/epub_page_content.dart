@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:myreader/core/utils/locale_text.dart';
 import 'package:myreader/data/services/reader_pagination/epub_block_spacing.dart';
 import 'package:myreader/data/services/reader_pagination/page_layout_model.dart';
 import 'package:myreader/domain/entities/reader_document/block_node.dart';
@@ -20,6 +21,9 @@ class EpubPageContent extends StatelessWidget {
   final StrutStyle? textStrutStyle;
   final Map<String, Uint8List> imageBytesByPath;
   final double imageMaxHeight;
+  final String bookTitle;
+  final String? bookAuthor;
+  final String? bookLanguage;
 
   const EpubPageContent({
     super.key,
@@ -34,6 +38,9 @@ class EpubPageContent extends StatelessWidget {
     required this.textStrutStyle,
     required this.imageBytesByPath,
     required this.imageMaxHeight,
+    this.bookTitle = '',
+    this.bookAuthor,
+    this.bookLanguage,
   });
 
   @override
@@ -51,6 +58,10 @@ class EpubPageContent extends StatelessWidget {
       16.0,
       28.0,
     );
+
+    if (_isCoverStartPage()) {
+      return _buildCoverStartPage(context);
+    }
 
     return SafeArea(
       child: Padding(
@@ -111,6 +122,137 @@ class EpubPageContent extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  bool _isCoverStartPage() {
+    if (chapter.title.trim().isNotEmpty ||
+        layout.pageIndex != 0 ||
+        layout.chapterIndex != 0 ||
+        layout.segments.length != 1) {
+      return false;
+    }
+
+    final segment = layout.segments.single;
+    if (segment.segmentType != PageSegmentType.image ||
+        segment.blockIndex < 0 ||
+        segment.blockIndex >= chapter.blocks.length) {
+      return false;
+    }
+
+    return chapter.blocks[segment.blockIndex].type == BlockNodeType.image;
+  }
+
+  Widget _buildCoverStartPage(BuildContext context) {
+    final segment = layout.segments.single;
+    final imageBlock = chapter.blocks[segment.blockIndex];
+    final title = bookTitle.trim();
+    final author = bookAuthor?.trim() ?? '';
+    final titleStyle = chapterHeaderTitleStyle.copyWith(
+      fontSize: min(26, max(21, chapterHeaderTitleStyle.fontSize ?? 26)),
+      height: 1.24,
+      color: chapterHeaderTitleStyle.color ?? bodyTextStyle.color,
+      fontWeight: FontWeight.w700,
+    );
+    final authorStyle = bodyTextStyle.copyWith(
+      fontSize: max(14, (bodyTextStyle.fontSize ?? 20) * 0.78),
+      height: 1.18,
+      color: (bodyTextStyle.color ?? Colors.black).withValues(alpha: 0.62),
+      fontWeight: FontWeight.w500,
+    );
+    final hintStyle = bodyTextStyle.copyWith(
+      fontSize: max(10, (bodyTextStyle.fontSize ?? 20) * 0.56),
+      height: 1.2,
+      color: chapterOverlayColor.withValues(alpha: 0.68),
+      fontWeight: FontWeight.w400,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            Padding(
+              padding: contentPadding,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildImageBlock(imageBlock),
+                      if (title.isNotEmpty) ...[
+                        const SizedBox(height: 26),
+                        Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          textScaler: TextScaler.noScaling,
+                          style: titleStyle,
+                        ),
+                      ],
+                      if (author.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          author,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          textScaler: TextScaler.noScaling,
+                          style: authorStyle,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.arrow_back_rounded,
+                      size: max(11, (hintStyle.fontSize ?? 11) + 1),
+                      color: hintStyle.color,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      LocaleText.of(
+                        context,
+                        zh: _coverStartHint(isChinese: true),
+                        en: _coverStartHint(isChinese: false),
+                      ),
+                      textScaler: TextScaler.noScaling,
+                      style: hintStyle,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _coverStartHint({required bool isChinese}) {
+    final language = bookLanguage?.trim().toLowerCase();
+    if (language != null && language.isNotEmpty) {
+      return language.startsWith('zh')
+          ? '左滑开始阅读'
+          : 'Swipe left to start reading';
+    }
+    final titleAndAuthor = '$bookTitle ${bookAuthor ?? ''}';
+    if (RegExp(r'[\u3400-\u9fff]').hasMatch(titleAndAuthor)) {
+      return '左滑开始阅读';
+    }
+    return isChinese ? '左滑开始阅读' : 'Swipe left to start reading';
   }
 
   List<Widget> _buildBlockWidgets({
@@ -192,7 +334,7 @@ class EpubPageContent extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               left: BorderSide(
-                color: chapterOverlayColor.withOpacity(0.4),
+                color: chapterOverlayColor.withValues(alpha: 0.4),
                 width: 2,
               ),
             ),
@@ -208,7 +350,7 @@ class EpubPageContent extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Divider(
-            color: chapterOverlayColor.withOpacity(0.32),
+            color: chapterOverlayColor.withValues(alpha: 0.32),
             height: 1,
           ),
         );
@@ -265,9 +407,9 @@ class EpubPageContent extends StatelessWidget {
       height: min(160, imageMaxHeight),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: chapterOverlayColor.withOpacity(0.08),
+        color: chapterOverlayColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: chapterOverlayColor.withOpacity(0.16)),
+        border: Border.all(color: chapterOverlayColor.withValues(alpha: 0.16)),
       ),
       child: Text(
         label,
@@ -361,7 +503,7 @@ class EpubPageContent extends StatelessWidget {
         return _flattenChildren(
           node.children,
           currentStyle.copyWith(
-            color: currentStyle.color?.withOpacity(0.88),
+            color: currentStyle.color?.withValues(alpha: 0.88),
             decoration: TextDecoration.underline,
           ),
         );

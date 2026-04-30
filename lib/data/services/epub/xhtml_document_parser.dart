@@ -38,7 +38,7 @@ class XhtmlDocumentParser {
         .map(_flattenInlineText)
         .firstWhere(
           (value) => value.trim().isNotEmpty,
-          orElse: () => fallbackTitle,
+          orElse: () => fallbackTitle.trim(),
         );
 
     return ChapterDocument(
@@ -83,6 +83,14 @@ class XhtmlDocumentParser {
           ),
         ];
       case 'p':
+        final imageBlock = _parseStandaloneImageParagraph(
+          node: node,
+          chapterHref: chapterHref,
+          imageDimensions: imageDimensions,
+        );
+        if (imageBlock != null) {
+          return [imageBlock];
+        }
         return [BlockNode.paragraph(children: _parseInlineNodes(node))];
       case 'blockquote':
         return [BlockNode.quote(children: _parseInlineNodes(node))];
@@ -93,19 +101,21 @@ class XhtmlDocumentParser {
         if (source == null || source.isEmpty) {
           return const [];
         }
-        final resolvedSrc = EpubArchiveService().resolvePath(
-          basePath: chapterHref,
-          relativePath: source,
-        );
-        final dimensions = imageDimensions[resolvedSrc];
         return [
-          BlockNode.image(
-            src: resolvedSrc,
+          _buildImageBlock(
+            source: source,
             alt: node.getAttribute('alt'),
-            intrinsicWidth: dimensions?.width,
-            intrinsicHeight: dimensions?.height,
+            chapterHref: chapterHref,
+            imageDimensions: imageDimensions,
           ),
         ];
+      case 'svg':
+        final svgImageBlock = _parseSvgImageBlock(
+          node: node,
+          chapterHref: chapterHref,
+          imageDimensions: imageDimensions,
+        );
+        return svgImageBlock == null ? const [] : [svgImageBlock];
       case 'body':
       case 'section':
       case 'article':
@@ -126,6 +136,95 @@ class XhtmlDocumentParser {
         }
         return [BlockNode.paragraph(children: inlineChildren)];
     }
+  }
+
+  BlockNode? _parseStandaloneImageParagraph({
+    required XmlElement node,
+    required String chapterHref,
+    required ImageDimensionLookup imageDimensions,
+  }) {
+    final elements = node.children.whereType<XmlElement>().toList();
+    if (elements.length != 1 || elements.single.name.local != 'img') {
+      return null;
+    }
+    final text = node.children.whereType<XmlText>().map((text) {
+      return _normalizeText(text.value);
+    }).join();
+    if (text.isNotEmpty) {
+      return null;
+    }
+
+    final image = elements.single;
+    final source = image.getAttribute('src');
+    if (source == null || source.isEmpty) {
+      return null;
+    }
+    final resolvedSrc = EpubArchiveService().resolvePath(
+      basePath: chapterHref,
+      relativePath: source,
+    );
+    final dimensions = imageDimensions[resolvedSrc];
+    return _buildImageBlock(
+      source: source,
+      alt: image.getAttribute('alt'),
+      chapterHref: chapterHref,
+      imageDimensions: imageDimensions,
+      intrinsicWidth: dimensions?.width,
+      intrinsicHeight: dimensions?.height,
+    );
+  }
+
+  BlockNode? _parseSvgImageBlock({
+    required XmlElement node,
+    required String chapterHref,
+    required ImageDimensionLookup imageDimensions,
+  }) {
+    final image = node.descendants.whereType<XmlElement>().firstWhere(
+      (element) => element.name.local == 'image',
+      orElse: () => XmlElement(XmlName('image')),
+    );
+    final source = _attributeByLocalName(image, 'href');
+    if (source == null || source.isEmpty) {
+      return null;
+    }
+    return _buildImageBlock(
+      source: source,
+      alt: image.getAttribute('alt'),
+      chapterHref: chapterHref,
+      imageDimensions: imageDimensions,
+      intrinsicWidth: double.tryParse(image.getAttribute('width') ?? ''),
+      intrinsicHeight: double.tryParse(image.getAttribute('height') ?? ''),
+    );
+  }
+
+  BlockNode _buildImageBlock({
+    required String source,
+    required String? alt,
+    required String chapterHref,
+    required ImageDimensionLookup imageDimensions,
+    double? intrinsicWidth,
+    double? intrinsicHeight,
+  }) {
+    final resolvedSrc = EpubArchiveService().resolvePath(
+      basePath: chapterHref,
+      relativePath: source,
+    );
+    final dimensions = imageDimensions[resolvedSrc];
+    return BlockNode.image(
+      src: resolvedSrc,
+      alt: alt,
+      intrinsicWidth: intrinsicWidth ?? dimensions?.width,
+      intrinsicHeight: intrinsicHeight ?? dimensions?.height,
+    );
+  }
+
+  String? _attributeByLocalName(XmlElement element, String localName) {
+    for (final attribute in element.attributes) {
+      if (attribute.name.local == localName) {
+        return attribute.value;
+      }
+    }
+    return null;
   }
 
   List<InlineNode> _parseInlineNodes(XmlNode node) {

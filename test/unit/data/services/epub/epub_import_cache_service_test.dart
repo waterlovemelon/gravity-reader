@@ -26,6 +26,28 @@ void main() {
     expect(restored?.package.toc.first.href, 'OPS/Text/chapter1.xhtml');
   });
 
+  test(
+    'uses explicit display title instead of verbose metadata title',
+    () async {
+      final epubPath = await writeBasicEpubFixture();
+      final tempDir = await Directory.systemTemp.createTemp(
+        'epub_display_title_test',
+      );
+      final service = EpubImportCacheService(
+        appDirProvider: () async => tempDir,
+      );
+
+      final data = await service.prepare(
+        bookId: 'book-1',
+        epubPath: epubPath,
+        displayTitle: '水浒传（果麦经典）',
+      );
+
+      expect(data.package.metadata.title, 'Fixture Book');
+      expect(data.document.title, '水浒传（果麦经典）');
+    },
+  );
+
   test('skips spine nav document while keeping package toc entries', () async {
     final epubPath = await writeEpubFixtureWithSpineNavPage();
     final tempDir = await Directory.systemTemp.createTemp(
@@ -76,6 +98,35 @@ void main() {
       'OPS/Text/chapter2.xhtml',
     ]);
     expect(data.document.chapters.map((chapter) => chapter.title), [
+      '第一章',
+      '第二章',
+    ]);
+  });
+
+  test('uses EPUB 2 NCX toc and keeps non-linear cover page', () async {
+    final epubPath = await writeEpub2FixtureWithNcxAndNonLinearCover();
+    final tempDir = await Directory.systemTemp.createTemp('epub2_ncx_test');
+    final service = EpubImportCacheService(appDirProvider: () async => tempDir);
+
+    final data = await service.prepare(bookId: 'book-1', epubPath: epubPath);
+
+    expect(data.package.toc.map((entry) => entry.title), [
+      '封面',
+      '目录',
+      '第一章',
+      '第二章',
+    ]);
+    expect(data.document.chapters.map((chapter) => chapter.href), [
+      'OPS/coverpage.xhtml',
+      'OPS/Text/chapter1.xhtml',
+      'OPS/Text/chapter2.xhtml',
+    ]);
+    expect(
+      data.document.chapters.first.blocks.single.src,
+      'OPS/Images/cover.jpg',
+    );
+    expect(data.document.chapters.map((chapter) => chapter.title), [
+      '',
       '第一章',
       '第二章',
     ]);

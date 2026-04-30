@@ -20,7 +20,30 @@ Future<String> writeEpubFixtureWithSpineContentsPage() async {
   return _writeEpubFixture(opfXml: _opfWithSpineContentsXml);
 }
 
+Future<String> writeEpub2FixtureWithNcxAndNonLinearCover() async {
+  return _writeEpubFixtureWithOptions(
+    opfXml: _opfWithNcxAndNonLinearCoverXml,
+    ncxXml: _tocNcx,
+    coverPageXhtml: _coverPageXhtml,
+    catalogXhtml: _contentsXhtml,
+  );
+}
+
 Future<String> _writeEpubFixture({required String opfXml}) async {
+  return _writeEpubFixtureWithOptions(
+    opfXml: opfXml,
+    ncxXml: null,
+    coverPageXhtml: null,
+    catalogXhtml: null,
+  );
+}
+
+Future<String> _writeEpubFixtureWithOptions({
+  required String opfXml,
+  required String? ncxXml,
+  required String? coverPageXhtml,
+  required String? catalogXhtml,
+}) async {
   final archive = Archive()
     ..addFile(
       ArchiveFile.noCompress(
@@ -73,6 +96,29 @@ Future<String> _writeEpubFixture({required String opfXml}) async {
     ..addFile(
       ArchiveFile('OPS/Images/cover.jpg', _coverBytes.length, _coverBytes),
     );
+  if (ncxXml != null) {
+    archive.addFile(
+      ArchiveFile('OPS/toc.ncx', ncxXml.length, utf8.encode(ncxXml)),
+    );
+  }
+  if (coverPageXhtml != null) {
+    archive.addFile(
+      ArchiveFile(
+        'OPS/coverpage.xhtml',
+        coverPageXhtml.length,
+        utf8.encode(coverPageXhtml),
+      ),
+    );
+  }
+  if (catalogXhtml != null) {
+    archive.addFile(
+      ArchiveFile(
+        'OPS/Text/catalog.xhtml',
+        catalogXhtml.length,
+        utf8.encode(catalogXhtml),
+      ),
+    );
+  }
 
   final bytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
   final file = File(
@@ -97,6 +143,7 @@ const _opfXml = '''
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>Fixture Book</dc:title>
     <dc:creator>Fixture Author</dc:creator>
+    <dc:language>zh</dc:language>
     <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>
@@ -118,6 +165,7 @@ const _opfWithSpineNavXml = '''
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>Fixture Book</dc:title>
     <dc:creator>Fixture Author</dc:creator>
+    <dc:language>zh</dc:language>
     <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>
@@ -140,6 +188,7 @@ const _opfWithSpineLandmarksXml = '''
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>Fixture Book</dc:title>
     <dc:creator>Fixture Author</dc:creator>
+    <dc:language>zh</dc:language>
     <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>
@@ -163,6 +212,7 @@ const _opfWithSpineContentsXml = '''
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>Fixture Book</dc:title>
     <dc:creator>Fixture Author</dc:creator>
+    <dc:language>zh</dc:language>
     <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>
@@ -180,6 +230,32 @@ const _opfWithSpineContentsXml = '''
 </package>
 ''';
 
+const _opfWithNcxAndNonLinearCoverXml = '''
+<?xml version="1.0" encoding="utf-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Fixture Book</dc:title>
+    <dc:creator>Fixture Author</dc:creator>
+    <dc:language>zh</dc:language>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="cover-image" href="Images/cover.jpg" media-type="image/jpeg"/>
+    <item id="coverpage" href="coverpage.xhtml" media-type="application/xhtml+xml"/>
+    <item id="catalog" href="Text/catalog.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-2" href="Text/chapter2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="toc">
+    <itemref idref="coverpage" linear="no"/>
+    <itemref idref="catalog"/>
+    <itemref idref="chapter-1"/>
+    <itemref idref="chapter-2"/>
+  </spine>
+</package>
+''';
+
 const _navXhtml = '''
 <html xmlns="http://www.w3.org/1999/xhtml">
   <body>
@@ -189,6 +265,38 @@ const _navXhtml = '''
         <li><a href="Text/chapter2.xhtml">第二章</a></li>
       </ol>
     </nav>
+  </body>
+</html>
+''';
+
+const _tocNcx = '''
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="navPoint-1" playOrder="1">
+      <navLabel><text>封面</text></navLabel>
+      <content src="coverpage.xhtml"/>
+    </navPoint>
+    <navPoint id="navPoint-2" playOrder="2">
+      <navLabel><text>目录</text></navLabel>
+      <content src="Text/catalog.xhtml"/>
+    </navPoint>
+    <navPoint id="navPoint-3" playOrder="3">
+      <navLabel><text>第一章</text></navLabel>
+      <content src="Text/chapter1.xhtml"/>
+    </navPoint>
+    <navPoint id="navPoint-4" playOrder="4">
+      <navLabel><text>第二章</text></navLabel>
+      <content src="Text/chapter2.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>
+''';
+
+const _coverPageXhtml = '''
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <p><img src="Images/cover.jpg" alt="cover"/></p>
   </body>
 </html>
 ''';

@@ -1277,7 +1277,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       final sourceFile = File(pickedFile.path!);
       await sourceFile.copy(newPath);
 
-      final baseTitle = pickedFileName.replaceFirst(RegExp(r'\\.[^.]+$'), '');
+      final baseTitle = pickedFileName.replaceFirst(RegExp(r'\.[^.]+$'), '');
       final bookId = DateTime.now().millisecondsSinceEpoch.toString();
       String? coverPath;
       late String title;
@@ -1288,6 +1288,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         final cacheData = await _epubImportCacheService.prepare(
           bookId: bookId,
           epubPath: newPath,
+          displayTitle: baseTitle,
         );
         await _epubImportCacheService.write(bookId: bookId, data: cacheData);
         title = cacheData.document.title;
