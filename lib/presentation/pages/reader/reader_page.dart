@@ -18,10 +18,25 @@ import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/core/utils/locale_text.dart';
+import 'package:myreader/data/services/epub/epub_archive_service.dart';
+import 'package:myreader/data/services/epub/epub_import_cache_service.dart';
+import 'package:myreader/data/services/epub/epub_package.dart';
+import 'package:myreader/data/services/reader_pagination/epub_paginator.dart';
+import 'package:myreader/data/services/reader_pagination/epub_pagination_cache_service.dart';
+import 'package:myreader/data/services/reader_pagination/flutter_layout_measurer.dart';
+import 'package:myreader/data/services/reader_pagination/locator_mapper.dart';
+import 'package:myreader/data/services/reader_pagination/page_layout_model.dart';
+import 'package:myreader/data/services/reader_pagination/pagination_settings.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
+import 'package:myreader/domain/entities/reader_document/block_node.dart';
+import 'package:myreader/domain/entities/reader_document/book_document.dart';
+import 'package:myreader/domain/entities/reader_document/chapter_document.dart';
+import 'package:myreader/domain/entities/reader_document/inline_node.dart';
+import 'package:myreader/domain/entities/reader_document/reader_locator.dart';
 import 'package:myreader/presentation/pages/reader/audiobook_page_redesign.dart';
+import 'package:myreader/presentation/pages/reader/widgets/epub_page_content.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:screen_brightness/screen_brightness.dart';
@@ -63,6 +78,13 @@ class _TxtPage {
     required this.startOffset,
     required this.endOffset,
   });
+}
+
+class _EpubPageEntry {
+  final ChapterDocument chapter;
+  final PageLayout layout;
+
+  const _EpubPageEntry({required this.chapter, required this.layout});
 }
 
 class _TxtLocation {
@@ -443,6 +465,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   late PageController _pageController;
   final int _fallbackPages = 100;
   late final AnimationController _floatingCoverController;
+  final EpubArchiveService _epubArchiveService = const EpubArchiveService();
+  final EpubImportCacheService _epubImportCacheService =
+      const EpubImportCacheService();
+  final EpubPaginationCacheService _epubPaginationCacheService =
+      const EpubPaginationCacheService();
   final TxtImportCacheService _txtImportCacheService =
       const TxtImportCacheService();
 
@@ -462,12 +489,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   _TxtLocation? _currentTxtLocation;
   bool _showTxtOpeningView = false;
   bool _isAdjustingTxtPageStream = false;
+  bool _isLoadingEpub = false;
+  bool _epubLoadScheduled = false;
+  String? _epubError;
+  String? _loadedEpubPath;
+  List<_EpubPageEntry> _epubPages = const [];
+  List<_TocEntry> _epubToc = const [];
+  ReaderLocator? _currentEpubLocator;
+  bool _showEpubOpeningView = false;
+  Map<String, Uint8List> _epubResourceBytes = const {};
+  String? _epubBookLanguage;
   int? _lastPageTurnStart; // 用于追踪翻页延迟
 
   Timer? _progressSaveDebounce;
   Timer? _repaginateDebounce;
   Timer? _readerPrefsSaveDebounce;
   Timer? _txtOpeningViewDelayTimer;
+  Timer? _epubOpeningViewDelayTimer;
   int _readingTimeSeconds = 0;
   _ReaderPanel _activePanel = _ReaderPanel.none;
   int _fontSizePreset = 20;
@@ -540,6 +578,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _repaginateDebounce?.cancel();
     _readerPrefsSaveDebounce?.cancel();
     _txtOpeningViewDelayTimer?.cancel();
+    _epubOpeningViewDelayTimer?.cancel();
     _autoPageTimer?.cancel();
     _floatingCoverController.dispose();
     if (!widget.hiddenForAutoStart) {
@@ -1092,8 +1131,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       });
     }
 
+    if (!_isTxtBook(book) &&
+        _loadedEpubPath != book.epubPath &&
+        !_isLoadingEpub &&
+        !_epubLoadScheduled) {
+      _epubLoadScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadEpubBook(book);
+        }
+      });
+    }
+
     if (_isTxtBook(book) && _txtError != null) {
       return Center(child: Text(_txtError!));
+    }
+
+    if (!_isTxtBook(book) && _epubError != null) {
+      return Center(child: Text(_epubError!));
     }
 
     final isPreparingTxt =
@@ -1101,19 +1156,30 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         (_isLoadingTxt ||
             _loadedTxtPath != book.epubPath ||
             _txtChapters.isEmpty);
+    final isPreparingEpub =
+        !_isTxtBook(book) &&
+        (_isLoadingEpub ||
+            _loadedEpubPath != book.epubPath ||
+            _epubPages.isEmpty);
 
     final shouldShowTxtOpeningView =
         isPreparingTxt || (_isTxtBook(book) && _txtPages.isEmpty);
+    final shouldShowEpubOpeningView =
+        isPreparingEpub || (!_isTxtBook(book) && _epubPages.isEmpty);
+    final shouldShowOpeningView = _isTxtBook(book)
+        ? shouldShowTxtOpeningView
+        : shouldShowEpubOpeningView;
 
-    if (shouldShowTxtOpeningView && widget.hiddenForAutoStart) {
+    if (shouldShowOpeningView && widget.hiddenForAutoStart) {
       return const SizedBox.shrink();
     }
 
-    if (shouldShowTxtOpeningView && _showTxtOpeningView) {
+    if (shouldShowOpeningView &&
+        (_isTxtBook(book) ? _showTxtOpeningView : _showEpubOpeningView)) {
       return _buildOpeningView(book);
     }
 
-    if (shouldShowTxtOpeningView) {
+    if (shouldShowOpeningView) {
       return Stack(
         children: [
           Positioned.fill(child: _buildReaderBackgroundLayer()),
@@ -1200,9 +1266,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       _scheduleSaveTxtProgress(book);
                       return;
                     }
+                    final nextLocator = _locatorForEpubPage(page);
                     setState(() {
                       _currentPage = page;
+                      _currentEpubLocator = nextLocator;
                     });
+                    _scheduleSaveCurrentBookProgress(book);
                     if (_lastPageTurnStart != null) {
                       _lastPageTurnStart = null;
                     }
@@ -1539,15 +1608,34 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       );
     }
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 48, 24, 42),
-        child: Text(
-          'Book content for ${book.title}...\n\n'
-          'This is a placeholder for EPUB rendering.',
-          style: const TextStyle(fontSize: 17, height: 1.8),
-        ),
+    if (_epubPages.isEmpty || index >= _epubPages.length) {
+      return const SizedBox.shrink();
+    }
+
+    final page = _epubPages[index];
+    return EpubPageContent(
+      key: ValueKey(
+        'epub-page-$index-${page.chapter.spineIndex}-${page.layout.pageIndex}-theme-$_themeIndex',
       ),
+      chapter: page.chapter,
+      layout: page.layout,
+      contentPadding: _contentPadding,
+      bodyTextStyle: TextStyle(
+        fontSize: _contentFontSize,
+        height: _contentLineHeight,
+        color: _textColor,
+        fontFamily: _contentFontFamily,
+      ),
+      chapterHeaderTitleStyle: _chapterHeaderTitleStyle,
+      chapterOverlayFontSize: _chapterOverlayFontSize,
+      chapterOverlayReservedHeight: _chapterOverlayReservedHeight,
+      chapterOverlayColor: _readerSecondaryInfoColor,
+      textStrutStyle: _contentStrutStyle,
+      imageBytesByPath: _epubResourceBytes,
+      imageMaxHeight: _contentMaxHeight * 0.45,
+      bookTitle: book.title,
+      bookAuthor: book.author,
+      bookLanguage: _epubBookLanguage,
     );
   }
 
@@ -2215,6 +2303,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     double? rootPageHeight;
     var currentPage = _SettingsPanelPage.root;
     var previousPage = _SettingsPanelPage.root;
+    var draftFontSizePreset = _fontSizePreset.clamp(16, 40);
     const swatchWidth = 58.0;
     const swatchSpacing = 8.0;
     final viewportWidth = MediaQuery.of(context).size.width - 76;
@@ -2236,7 +2325,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
-          final fontSize = _fontSizePreset.clamp(16, 40);
+          final fontSize = draftFontSizePreset.clamp(16, 40);
           final isForward = currentPage.index >= previousPage.index;
           void syncRootPageHeight() {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2453,14 +2542,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                                   max: 40,
                                                   divisions: 12,
                                                   onChanged: (v) {
+                                                    draftFontSizePreset = v
+                                                        .round()
+                                                        .clamp(16, 40);
+                                                    setModalState(() {});
+                                                  },
+                                                  onChangeEnd: (_) {
+                                                    final nextFontSize =
+                                                        draftFontSizePreset
+                                                            .clamp(16, 40);
+                                                    if (nextFontSize ==
+                                                        _fontSizePreset) {
+                                                      return;
+                                                    }
                                                     setState(() {
-                                                      _fontSizePreset = v
-                                                          .round()
-                                                          .clamp(16, 40);
+                                                      _fontSizePreset =
+                                                          nextFontSize;
                                                     });
                                                     _scheduleSaveReaderPreferences();
                                                     _scheduleRepaginate();
-                                                    setModalState(() {});
                                                   },
                                                 ),
                                               ),
@@ -3604,6 +3704,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     required double max,
     int? divisions,
     ValueChanged<double>? onChanged,
+    ValueChanged<double>? onChangeEnd,
   }) {
     return SliderTheme(
       data: SliderTheme.of(context).copyWith(
@@ -3620,6 +3721,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         max: max,
         divisions: divisions,
         onChanged: onChanged,
+        onChangeEnd: onChangeEnd,
       ),
     );
   }
@@ -4439,6 +4541,269 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
   }
 
+  Future<void> _loadEpubBook(Book book, {String? preferredLocation}) async {
+    _epubOpeningViewDelayTimer?.cancel();
+    _epubOpeningViewDelayTimer = Timer(const Duration(milliseconds: 140), () {
+      if (!mounted || !_isLoadingEpub) {
+        return;
+      }
+      setState(() {
+        _showEpubOpeningView = true;
+      });
+    });
+    setState(() {
+      _isLoadingEpub = true;
+      _epubError = null;
+    });
+
+    try {
+      var cacheData = await _epubImportCacheService.read(book.id);
+      if (cacheData == null) {
+        cacheData = await _epubImportCacheService.prepare(
+          bookId: book.id,
+          epubPath: book.epubPath,
+        );
+        await _epubImportCacheService.write(bookId: book.id, data: cacheData);
+      }
+      if (cacheData.document.chapters.isEmpty) {
+        throw StateError('EPUB has no readable chapters.');
+      }
+      final resolvedCacheData = cacheData;
+
+      final sourceFileExists = await File(book.epubPath).exists();
+      final resources = sourceFileExists
+          ? _collectEpubResourceBytes(
+              document: resolvedCacheData.document,
+              entries: await _epubArchiveService.readEntries(book.epubPath),
+            )
+          : <String, Uint8List>{};
+      final progress = await ref
+          .read(getReadingProgressUseCaseProvider)
+          .call(book.id);
+      _readingTimeSeconds = progress?.readingTimeSeconds ?? 0;
+
+      if (!mounted) {
+        return;
+      }
+
+      final settings = _buildEpubPaginationSettings();
+      final paginator = EpubPaginator(
+        measurer: FlutterLayoutMeasurer(fontFamily: _contentFontFamily),
+      );
+      final chapterPagesBySpine = <int, List<PageLayout>>{};
+      final chapterStartPageBySpine = <int, int>{};
+      final flattenedPages = <_EpubPageEntry>[];
+
+      for (final chapter in resolvedCacheData.document.chapters) {
+        chapterStartPageBySpine[chapter.spineIndex] = flattenedPages.length;
+        final cacheKey = EpubPaginationCacheKey(
+          bookId: book.id,
+          spineIndex: chapter.spineIndex,
+          viewportWidth: settings.viewportWidth,
+          viewportHeight: settings.viewportHeight,
+          fontSize: settings.fontSize,
+          lineHeight: settings.lineHeight,
+          paddingPreset: 'p$_paddingPreset-f$_fontStylePreset',
+          imageLayoutPolicy: 'contain',
+          themeProfileVersion: 1,
+        );
+        final cachedPages = await _epubPaginationCacheService.read(
+          cacheKey: cacheKey,
+        );
+        final pages =
+            cachedPages ??
+            paginator.paginate(chapter: chapter, settings: settings).pages;
+        if (cachedPages == null) {
+          await _epubPaginationCacheService.write(
+            cacheKey: cacheKey,
+            pages: pages,
+          );
+        }
+        chapterPagesBySpine[chapter.spineIndex] = pages;
+        flattenedPages.addAll(
+          pages.map((page) => _EpubPageEntry(chapter: chapter, layout: page)),
+        );
+      }
+
+      final initialPage = _resolveInitialEpubPage(
+        location: preferredLocation ?? progress?.location,
+        chapterPagesBySpine: chapterPagesBySpine,
+        chapterStartPageBySpine: chapterStartPageBySpine,
+        totalPages: flattenedPages.length,
+      );
+      final safeInitialPage = initialPage
+          .clamp(0, max(0, flattenedPages.length - 1))
+          .toInt();
+      final initialLocator = flattenedPages.isEmpty
+          ? null
+          : _locatorForEpubPage(safeInitialPage, pages: flattenedPages);
+      _replacePageController(safeInitialPage);
+      setState(() {
+        _epubPages = List<_EpubPageEntry>.unmodifiable(flattenedPages);
+        _epubToc = _buildEpubToc(
+          document: resolvedCacheData.document,
+          packageToc: resolvedCacheData.package.toc,
+          pages: flattenedPages,
+        );
+        _currentPage = safeInitialPage;
+        _currentEpubLocator = initialLocator;
+        _epubResourceBytes = resources;
+        _epubBookLanguage =
+            resolvedCacheData.document.language ??
+            resolvedCacheData.package.metadata.language;
+        _loadedEpubPath = book.epubPath;
+        _isLoadingEpub = false;
+        _showEpubOpeningView = false;
+        _epubLoadScheduled = false;
+      });
+      _restorePageAfterBuild(safeInitialPage);
+      _epubOpeningViewDelayTimer?.cancel();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _epubError = 'Failed to load EPUB: $e';
+        _loadedEpubPath = book.epubPath;
+        _isLoadingEpub = false;
+        _showEpubOpeningView = false;
+        _epubLoadScheduled = false;
+      });
+      _epubOpeningViewDelayTimer?.cancel();
+    }
+  }
+
+  PaginationSettings _buildEpubPaginationSettings() {
+    final media = MediaQuery.of(context);
+    return PaginationSettings(
+      viewportWidth: media.size.width,
+      viewportHeight:
+          media.size.height -
+          media.padding.top -
+          media.padding.bottom -
+          _chapterHeaderBlockHeight,
+      contentPaddingTop: _contentPadding.top,
+      contentPaddingBottom: _contentPadding.bottom + _paginationSafetyInset,
+      contentPaddingHorizontal: _contentPadding.left,
+      fontSize: _contentFontSize,
+      lineHeight: _contentLineHeight,
+    );
+  }
+
+  Map<String, Uint8List> _collectEpubResourceBytes({
+    required BookDocument document,
+    required Map<String, List<int>> entries,
+  }) {
+    final resourcePaths = <String>{
+      for (final chapter in document.chapters)
+        for (final block in chapter.blocks)
+          if (block.type == BlockNodeType.image && block.src != null)
+            block.src!,
+    };
+    return {
+      for (final path in resourcePaths)
+        if (entries.containsKey(path)) path: Uint8List.fromList(entries[path]!),
+    };
+  }
+
+  int _resolveInitialEpubPage({
+    required String? location,
+    required Map<int, List<PageLayout>> chapterPagesBySpine,
+    required Map<int, int> chapterStartPageBySpine,
+    required int totalPages,
+  }) {
+    if (totalPages <= 0) {
+      return 0;
+    }
+    if (location != null && location.startsWith('epub:')) {
+      try {
+        final locator = ReaderLocator.decode(location.substring(5));
+        final chapterPages = chapterPagesBySpine[locator.spineIndex];
+        final chapterStartPage = chapterStartPageBySpine[locator.spineIndex];
+        if (chapterPages != null &&
+            chapterPages.isNotEmpty &&
+            chapterStartPage != null) {
+          return (chapterStartPage +
+                  LocatorMapper.pageIndexFor(
+                    locator: locator,
+                    pages: chapterPages,
+                  ))
+              .clamp(0, totalPages - 1);
+        }
+      } catch (_) {}
+    }
+    if (location != null && location.startsWith('page:')) {
+      final savedPage = int.tryParse(location.substring(5));
+      if (savedPage != null) {
+        return savedPage.clamp(0, totalPages - 1);
+      }
+    }
+    return 0;
+  }
+
+  List<_TocEntry> _buildEpubToc({
+    required BookDocument document,
+    required List<EpubTocEntry> packageToc,
+    required List<_EpubPageEntry> pages,
+  }) {
+    if (pages.isEmpty) {
+      return const [];
+    }
+
+    final chapterFirstPage = <String, int>{};
+    for (var index = 0; index < pages.length; index++) {
+      chapterFirstPage.putIfAbsent(
+        _normalizeEpubHref(pages[index].chapter.href),
+        () => index,
+      );
+    }
+
+    final tocEntries = <_TocEntry>[];
+    final seenPages = <int>{};
+    for (final entry in packageToc) {
+      final pageIndex = chapterFirstPage[_normalizeEpubHref(entry.href)];
+      if (pageIndex == null || !seenPages.add(pageIndex)) {
+        continue;
+      }
+      tocEntries.add(_TocEntry(title: entry.title, pageIndex: pageIndex));
+    }
+    if (tocEntries.isNotEmpty) {
+      return tocEntries;
+    }
+
+    for (var index = 0; index < document.chapters.length; index++) {
+      final chapter = document.chapters[index];
+      final pageIndex = chapterFirstPage[_normalizeEpubHref(chapter.href)];
+      if (pageIndex == null) {
+        continue;
+      }
+      tocEntries.add(
+        _TocEntry(
+          title: chapter.title.trim().isEmpty
+              ? _text(zh: '第${index + 1}章', en: 'Chapter ${index + 1}')
+              : chapter.title,
+          pageIndex: pageIndex,
+        ),
+      );
+    }
+    return tocEntries;
+  }
+
+  String _normalizeEpubHref(String href) => href.split('#').first;
+
+  ReaderLocator? _locatorForEpubPage(
+    int pageIndex, {
+    List<_EpubPageEntry>? pages,
+  }) {
+    final sourcePages = pages ?? _epubPages;
+    if (sourcePages.isEmpty ||
+        pageIndex < 0 ||
+        pageIndex >= sourcePages.length) {
+      return null;
+    }
+    return LocatorMapper.locatorForPageStart(sourcePages[pageIndex].layout);
+  }
+
   List<_TocEntry> _buildTocEntries(Book book) {
     if (_isTxtBook(book) && _txtChapters.isNotEmpty) {
       return _buildTocFromChapters();
@@ -4446,6 +4811,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     if (_isTxtBook(book) && _txtToc.isNotEmpty) {
       return _txtToc;
+    }
+
+    if (!_isTxtBook(book) && _epubToc.isNotEmpty) {
+      return _epubToc;
     }
 
     final total = _resolveTotalPages(book);
@@ -4465,6 +4834,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   int _resolveTotalPages(Book book) {
     if (_isTxtBook(book)) {
       return max(1, _txtPages.length);
+    }
+    if (_epubPages.isNotEmpty) {
+      return _epubPages.length;
     }
     return book.totalPages ?? _fallbackPages;
   }
@@ -4711,17 +5083,32 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _scheduleRepaginate({bool immediate = false}) {
-    if (_txtChapters.isEmpty || _currentTxtLocation == null) {
-      return;
-    }
     _repaginateDebounce?.cancel();
     _repaginateDebounce = Timer(
       Duration(milliseconds: immediate ? 0 : 120),
-      () {
+      () async {
         if (!mounted) {
           return;
         }
-        _repaginateVisibleTxtPages();
+        final currentBook =
+            ref.read(bookByIdProvider(widget.bookId)).valueOrNull ??
+            widget.initialBook;
+        if (currentBook == null) {
+          return;
+        }
+        if (_isTxtBook(currentBook)) {
+          if (_txtChapters.isEmpty || _currentTxtLocation == null) {
+            return;
+          }
+          _repaginateVisibleTxtPages();
+          return;
+        }
+        final preferredLocation = _currentEpubLocator == null
+            ? null
+            : 'epub:${_currentEpubLocator!.encode()}';
+        _loadedEpubPath = null;
+        _epubLoadScheduled = false;
+        await _loadEpubBook(currentBook, preferredLocation: preferredLocation);
       },
     );
   }
@@ -5237,6 +5624,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return (_globalOffsetForLocation(_currentTxtLocation!) / _txtTotalLength)
           .clamp(0.0, 1.0);
     }
+    if (_epubPages.isNotEmpty) {
+      if (_epubPages.length == 1) {
+        return 1.0;
+      }
+      return (_currentPage / (_epubPages.length - 1)).clamp(0.0, 1.0);
+    }
     final total = max(1, _txtPages.isEmpty ? _fallbackPages : _txtPages.length);
     return (_currentPage / total).clamp(0.0, 1.0);
   }
@@ -5284,6 +5677,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
+  void _scheduleSaveCurrentBookProgress(Book book) {
+    _progressSaveDebounce?.cancel();
+    _progressSaveDebounce = Timer(const Duration(milliseconds: 220), () {
+      _persistCurrentBookProgress(book);
+    });
+  }
+
   Future<void> _persistCurrentBookProgress(Book? book) async {
     if (book == null) {
       return;
@@ -5294,9 +5694,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
     final totalPages = max(1, _resolveTotalPages(book));
     final safePage = _currentPage.clamp(0, totalPages - 1);
+    final locator = _locatorForEpubPage(safePage);
     final progress = ReadingProgress(
       bookId: book.id,
-      location: 'page:$safePage',
+      location: locator == null ? 'page:$safePage' : 'epub:${locator.encode()}',
       percentage: (safePage + 1) / totalPages,
       lastReadAt: DateTime.now(),
       readingTimeSeconds: _readingTimeSeconds,
@@ -6200,11 +6601,52 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   String? _getEpubPageText(Book book) {
-    // TODO: 从EPUB中获取当前页面的文本
-    // 这里暂时返回占位符文本
-    return LocaleText.isChinese(context)
-        ? '这是EPUB书籍的第${_currentPage + 1}页内容。\n\n需要通过Flureadium集成来获取实际的EPUB文本内容。'
-        : 'This is page ${_currentPage + 1} of the EPUB book.\n\nActual EPUB text requires Flureadium integration.';
+    if (_isTxtBook(book) || _epubPages.isEmpty) {
+      return null;
+    }
+    final page = _epubPages[_currentPage.clamp(0, _epubPages.length - 1)];
+    final parts = <String>[];
+    for (final segment in page.layout.segments) {
+      if (segment.blockIndex < 0 ||
+          segment.blockIndex >= page.chapter.blocks.length) {
+        continue;
+      }
+      final block = page.chapter.blocks[segment.blockIndex];
+      switch (block.type) {
+        case BlockNodeType.heading:
+        case BlockNodeType.paragraph:
+        case BlockNodeType.quote:
+          final text = _flattenInlineNodes(block.children);
+          final safeStart = segment.startInlineOffset.clamp(0, text.length);
+          final safeEnd = segment.endInlineOffset.clamp(safeStart, text.length);
+          final sliced = text.substring(safeStart, safeEnd).trim();
+          if (sliced.isNotEmpty) {
+            parts.add(sliced);
+          }
+          break;
+        case BlockNodeType.separator:
+          break;
+        case BlockNodeType.image:
+          final alt = block.alt?.trim();
+          if (alt != null && alt.isNotEmpty) {
+            parts.add(alt);
+          }
+          break;
+      }
+    }
+    final joined = parts.join('\n').trim();
+    return joined.isEmpty ? null : joined;
+  }
+
+  String _flattenInlineNodes(List<InlineNode> nodes) {
+    return nodes.map(_flattenInlineNode).join();
+  }
+
+  String _flattenInlineNode(InlineNode node) {
+    if (node.type == InlineNodeType.text) {
+      return node.text;
+    }
+    return node.children.map(_flattenInlineNode).join();
   }
 
   EdgeInsets get mediaQueryPadding => MediaQuery.of(context).padding;

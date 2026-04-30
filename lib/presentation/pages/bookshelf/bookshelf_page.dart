@@ -20,11 +20,11 @@ import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/usecase_providers.dart';
 import 'package:myreader/core/utils/locale_text.dart';
+import 'package:myreader/data/services/epub/epub_import_cache_service.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/category.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
-import 'package:myreader/flureadium_integration/epub_parser.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:myreader/presentation/widgets/bookshelf/bookshelf_grid_widget.dart';
@@ -38,8 +38,10 @@ class BookshelfPage extends ConsumerStatefulWidget {
 }
 
 class _BookshelfPageState extends ConsumerState<BookshelfPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
+  final EpubImportCacheService _epubImportCacheService =
+      const EpubImportCacheService();
   final TxtImportCacheService _txtImportCacheService =
       const TxtImportCacheService();
   bool _isSearching = false;
@@ -1275,32 +1277,34 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       final sourceFile = File(pickedFile.path!);
       await sourceFile.copy(newPath);
 
-      final baseTitle = pickedFileName.replaceFirst(RegExp(r'\\.[^.]+$'), '');
+      final baseTitle = pickedFileName.replaceFirst(RegExp(r'\.[^.]+$'), '');
       final bookId = DateTime.now().millisecondsSinceEpoch.toString();
       String? coverPath;
-      String? title;
+      late String title;
       String? author;
       int? totalPages;
 
       if (fileExt == 'epub') {
-        // Parse EPUB for metadata
-        final parser = EpubParserImpl();
-        final parseResult = await parser.parse(newPath);
-        title = parseResult.metadata.title;
-        author = parseResult.metadata.author;
-        totalPages = parseResult.totalPages > 0 ? parseResult.totalPages : null;
+        final cacheData = await _epubImportCacheService.prepare(
+          bookId: bookId,
+          epubPath: newPath,
+          displayTitle: baseTitle,
+        );
+        await _epubImportCacheService.write(bookId: bookId, data: cacheData);
+        title = cacheData.document.title;
+        author = cacheData.document.author;
+        totalPages = null;
 
-        // Extract cover if available
-        if (parseResult.metadata.coverPath != null) {
-          final coversDir = Directory('${appDir.path}/covers');
-          if (!await coversDir.exists()) {
-            await coversDir.create(recursive: true);
-          }
-          coverPath = await parser.extractCover(
-            newPath,
-            '${coversDir.path}/${DateTime.now().millisecondsSinceEpoch}.jpg',
-          );
+        final coversDir = Directory('${appDir.path}/covers');
+        if (!await coversDir.exists()) {
+          await coversDir.create(recursive: true);
         }
+        coverPath = await _epubImportCacheService.extractCover(
+          epubPath: newPath,
+          package: cacheData.package,
+          destinationPath:
+              '${coversDir.path}/${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
       } else {
         final decoded = await _readTxtContent(newPath);
         final cacheData = await _txtImportCacheService.prepare(
@@ -1320,7 +1324,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       // Create book entity
       final book = Book(
         id: bookId,
-        title: title ?? baseTitle,
+        title: title,
         author: author,
         coverPath: coverPath,
         epubPath: newPath,
