@@ -27,6 +27,7 @@ import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/category.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
+import 'package:myreader/presentation/widgets/app_top_notice.dart';
 import 'package:myreader/presentation/widgets/bookshelf/book_cover_widget.dart';
 import 'package:myreader/presentation/widgets/bookshelf/bookshelf_grid_widget.dart';
 import 'package:myreader/presentation/pages/bookshelf/cover_search_browser_page.dart';
@@ -687,7 +688,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       message: categoryId == null
           ? _text(zh: '已移出分类', en: 'Removed from category')
           : _text(zh: '已更新书籍分类', en: 'Book category updated'),
-      kind: _TopNoticeKind.success,
+      kind: AppTopNoticeKind.success,
     );
   }
 
@@ -810,6 +811,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   }
 
   Future<void> _handleListenTap(Book book) async {
+    _hideTopNotice(immediate: true);
     await Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
@@ -881,7 +883,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     ref.invalidate(allReadingProgressProvider);
     _showTopNotice(
       message: _text(zh: '已更新书籍信息', en: 'Book details updated'),
-      kind: _TopNoticeKind.success,
+      kind: AppTopNoticeKind.success,
     );
   }
 
@@ -1068,13 +1070,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       if (!mounted) return;
       _showTopNotice(
         message: _text(zh: '封面已更新', en: 'Cover updated'),
-        kind: _TopNoticeKind.success,
+        kind: AppTopNoticeKind.success,
       );
     } catch (e) {
       if (!mounted) return;
       _showTopNotice(
         message: '${_text(zh: '修改封面失败', en: 'Failed to update cover')}: $e',
-        kind: _TopNoticeKind.error,
+        kind: AppTopNoticeKind.error,
       );
     }
   }
@@ -1121,13 +1123,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       if (!mounted) return;
       _showTopNotice(
         message: _text(zh: '封面已更新', en: 'Cover updated'),
-        kind: _TopNoticeKind.success,
+        kind: AppTopNoticeKind.success,
       );
     } catch (e) {
       if (!mounted) return;
       _showTopNotice(
         message: '${_text(zh: '修改封面失败', en: 'Failed to update cover')}: $e',
-        kind: _TopNoticeKind.error,
+        kind: AppTopNoticeKind.error,
       );
     }
   }
@@ -1174,7 +1176,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       if (mounted) {
         _showTopNotice(
           message: '${_text(zh: '删除书籍失败', en: 'Failed to delete book')}: $e',
-          kind: _TopNoticeKind.error,
+          kind: AppTopNoticeKind.error,
         );
       }
     }
@@ -1256,7 +1258,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             zh: '请选择 EPUB 或 TXT 文件',
             en: 'Please choose an EPUB or TXT file',
           ),
-          kind: _TopNoticeKind.info,
+          kind: AppTopNoticeKind.info,
         );
         return;
       }
@@ -1348,14 +1350,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         message: LocaleText.isChinese(context)
             ? '已导入《${book.title}》'
             : 'Imported "${book.title}"',
-        kind: _TopNoticeKind.success,
+        kind: AppTopNoticeKind.success,
       );
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context); // Dismiss loading dialog
       _showTopNotice(
         message: '${_text(zh: '导入失败', en: 'Import failed')}: $e',
-        kind: _TopNoticeKind.error,
+        kind: AppTopNoticeKind.error,
       );
     }
   }
@@ -1405,6 +1407,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final startedAtMicros = DateTime.now().microsecondsSinceEpoch;
     final traceId = '${book.id}-${startedAtMicros.toRadixString(36)}';
     _logOpenTrace(traceId, startedAtMicros, 'tap received: ${book.title}');
+    _hideTopNotice(immediate: true);
     await Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 100),
@@ -1554,7 +1557,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     return LocaleText.of(context, zh: zh, en: en);
   }
 
-  void _showTopNotice({required String message, required _TopNoticeKind kind}) {
+  void _showTopNotice({
+    required String message,
+    required AppTopNoticeKind kind,
+  }) {
     if (!mounted) {
       return;
     }
@@ -1583,24 +1589,44 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
     _topNoticeController = controller;
     final entry = OverlayEntry(
-      builder: (context) => _TopFloatingNotice(
-        message: message,
-        theme: ref.read(currentThemeProvider),
-        kind: kind,
-        animation: curved,
-        onDismiss: _hideTopNotice,
-      ),
+      builder: (context) {
+        final mediaQuery = MediaQuery.of(context);
+        return IgnorePointer(
+          ignoring: false,
+          child: SafeArea(
+            bottom: false,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: mediaQuery.size.width > 640 ? 360 : 340,
+                  ),
+                  child: AppTopNotice(
+                    message: message,
+                    theme: ref.read(currentThemeProvider),
+                    kind: kind,
+                    animation: curved,
+                    onDismiss: _hideTopNotice,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
     _topNoticeEntry = entry;
     Overlay.of(context, rootOverlay: true).insert(entry);
     controller.forward();
 
-    _topNoticeTimer = Timer(const Duration(milliseconds: 2400), () {
+    _topNoticeTimer = Timer(AppTopNotice.visibleDuration, () {
       _hideTopNotice();
     });
   }
 
-  void _hideTopNotice() {
+  void _hideTopNotice({bool immediate = false}) {
     _topNoticeTimer?.cancel();
     final controller = _topNoticeController;
     final entry = _topNoticeEntry;
@@ -1610,6 +1636,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
     _topNoticeController = null;
     _topNoticeEntry = null;
+    if (immediate || !TickerMode.of(context)) {
+      entry.remove();
+      controller.dispose();
+      return;
+    }
     controller.reverse().whenComplete(() {
       entry.remove();
       controller.dispose();
@@ -1637,8 +1668,6 @@ class _CategorySelectionResult {
 }
 
 enum _BookQuickAction { details, changeCover, delete, stats }
-
-enum _TopNoticeKind { success, error, info }
 
 class _CurrentlyReadingCard extends StatelessWidget {
   final Book book;
@@ -2679,184 +2708,6 @@ class _BookStatRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _TopFloatingNotice extends StatelessWidget {
-  final String message;
-  final AppThemeData theme;
-  final _TopNoticeKind kind;
-  final Animation<double> animation;
-  final VoidCallback onDismiss;
-
-  const _TopFloatingNotice({
-    required this.message,
-    required this.theme,
-    required this.kind,
-    required this.animation,
-    required this.onDismiss,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final palette = _paletteForKind();
-
-    return IgnorePointer(
-      ignoring: false,
-      child: SafeArea(
-        bottom: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
-            child: AnimatedBuilder(
-              animation: animation,
-              builder: (context, child) {
-                final slideY = Tween<double>(
-                  begin: -30,
-                  end: 0,
-                ).evaluate(animation);
-                final scale = Tween<double>(
-                  begin: 0.92,
-                  end: 1,
-                ).evaluate(animation);
-                return Opacity(
-                  opacity: animation.value.clamp(0, 1),
-                  child: Transform.translate(
-                    offset: Offset(0, slideY),
-                    child: Transform.scale(scale: scale, child: child),
-                  ),
-                );
-              },
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: mediaQuery.size.width > 640 ? 356 : 332,
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onDismiss,
-                    borderRadius: BorderRadius.circular(26),
-                    child: Ink(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      decoration: BoxDecoration(
-                        color: palette.background,
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(color: palette.border, width: 1),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.textColor.withValues(alpha: 0.1),
-                            blurRadius: 24,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(26),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(minHeight: 62),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox(
-                                  width: 28,
-                                  height: 54,
-                                  child: Center(
-                                    child: Icon(
-                                      palette.icon,
-                                      size: 18,
-                                      color: palette.accent,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 13),
-                                Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(right: 2),
-                                    child: Text(
-                                      message,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: palette.foreground,
-                                        height: 1.24,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  _TopNoticePalette _paletteForKind() {
-    switch (kind) {
-      case _TopNoticeKind.success:
-        return _TopNoticePalette(
-          background: Color.alphaBlend(
-            theme.primaryColor.withValues(alpha: 0.2),
-            theme.cardBackgroundColor,
-          ),
-          border: theme.primaryColor.withValues(alpha: 0.34),
-          accent: theme.primaryColor,
-          foreground: theme.textColor,
-          icon: Icons.check_rounded,
-        );
-      case _TopNoticeKind.error:
-        return _TopNoticePalette(
-          background: Color.alphaBlend(
-            const Color(0xFFD85B5B).withValues(alpha: 0.18),
-            theme.cardBackgroundColor,
-          ),
-          border: const Color(0xFFD85B5B).withValues(alpha: 0.34),
-          accent: const Color(0xFFD85B5B),
-          foreground: theme.textColor,
-          icon: Icons.close_rounded,
-        );
-      case _TopNoticeKind.info:
-        return _TopNoticePalette(
-          background: Color.alphaBlend(
-            theme.accentColor.withValues(alpha: 0.18),
-            theme.cardBackgroundColor,
-          ),
-          border: theme.accentColor.withValues(alpha: 0.32),
-          accent: theme.accentColor,
-          foreground: theme.textColor,
-          icon: Icons.info_outline_rounded,
-        );
-    }
-  }
-}
-
-class _TopNoticePalette {
-  final Color background;
-  final Color border;
-  final Color accent;
-  final Color foreground;
-  final IconData icon;
-
-  const _TopNoticePalette({
-    required this.background,
-    required this.border,
-    required this.accent,
-    required this.foreground,
-    required this.icon,
-  });
 }
 
 class _CoverSourceOption extends StatelessWidget {
