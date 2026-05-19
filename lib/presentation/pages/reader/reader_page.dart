@@ -28,6 +28,7 @@ import 'package:myreader/data/services/reader_pagination/flutter_layout_measurer
 import 'package:myreader/data/services/reader_pagination/locator_mapper.dart';
 import 'package:myreader/data/services/reader_pagination/page_layout_model.dart';
 import 'package:myreader/data/services/reader_pagination/pagination_settings.dart';
+import 'package:myreader/data/services/reader_pagination/txt_pagination_metrics.dart';
 import 'package:myreader/data/services/txt_import_cache_service.dart';
 import 'package:myreader/domain/entities/book.dart';
 import 'package:myreader/domain/entities/reading_progress.dart';
@@ -537,6 +538,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _didLogFirstFrame = false;
   bool _didLogTxtContentFrame = false;
   bool _didAutoStartFloatingPlayback = false;
+  static const bool _debugTxtPagination = bool.fromEnvironment(
+    'READER_PAGINATION_DEBUG',
+    defaultValue: kDebugMode,
+  );
 
   void _logOpenTrace(String message) {
     final traceId = widget.openTraceId;
@@ -549,6 +554,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     debugPrint(
       '[open-book][$traceId][${elapsedMs.toStringAsFixed(1)}ms] $message',
     );
+  }
+
+  void _logTxtPaginationTrace(String message) {
+    if (!_debugTxtPagination) {
+      return;
+    }
+    debugPrint('[reader][txt-pagination] $message');
+  }
+
+  void _logEpubPaginationTrace(String message) {
+    if (!_debugTxtPagination) {
+      return;
+    }
+    debugPrint('[reader][epub-pagination] $message');
   }
 
   @override
@@ -4474,6 +4493,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       final totalLength = cacheData.totalLength;
 
       final layoutStart = DateTime.now().microsecondsSinceEpoch;
+      final media = MediaQuery.of(context);
+      _logTxtPaginationTrace(
+        'viewport width=${media.size.width.toStringAsFixed(1)} '
+        'height=${media.size.height.toStringAsFixed(1)} '
+        'safeTop=${media.padding.top.toStringAsFixed(1)} '
+        'safeBottom=${media.padding.bottom.toStringAsFixed(1)} '
+        'paddingV=${_contentPadding.vertical.toStringAsFixed(1)} '
+        'base=${_txtBaseContentHeight.toStringAsFixed(1)} '
+        'header=${_chapterHeaderBlockHeight.toStringAsFixed(1)} '
+        'overlay=${_chapterOverlayReservedHeight.toStringAsFixed(1)} '
+        'safety=${_paginationSafetyInset.toStringAsFixed(1)}',
+      );
       _logOpenTrace(
         'txt initial viewport build start, chapters=${chapters.length}, totalLength=$totalLength',
       );
@@ -4522,6 +4553,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         }
         _didLogTxtContentFrame = true;
         final page = _txtPages[_currentPage.clamp(0, _txtPages.length - 1)];
+        final chapterTitle = page.title;
+        final showChapterHeader = page.startOffset == 0;
+        final bodyHeight = _txtPaginationBodyHeight(
+          baseContentHeight: _txtBaseContentHeight,
+          showChapterHeader: showChapterHeader,
+          chapterTitle: chapterTitle,
+        );
+        _logTxtPaginationTrace(
+          'rendered page chapter=${page.chapterIndex} '
+          'start=${page.startOffset} end=${page.endOffset} '
+          'chrome=${_txtPageChromeName(showChapterHeader: showChapterHeader, chapterTitle: chapterTitle)} '
+          'body=${bodyHeight.toStringAsFixed(1)}',
+        );
         _logOpenTrace(
           'txt content frame rendered, chapter=${page.chapterIndex}, page=${page.startOffset}-${page.endOffset}',
         );
@@ -4593,9 +4637,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
 
       final settings = _buildEpubPaginationSettings();
-      final paginator = EpubPaginator(
-        measurer: FlutterLayoutMeasurer(fontFamily: _contentFontFamily),
+      _logEpubPaginationTrace(
+        'settings viewport=${settings.viewportWidth.toStringAsFixed(1)}x${settings.viewportHeight.toStringAsFixed(1)} '
+        'paddingTop=${settings.contentPaddingTop.toStringAsFixed(1)} '
+        'paddingBottom=${settings.contentPaddingBottom.toStringAsFixed(1)} '
+        'baseContent=${settings.contentHeight.toStringAsFixed(1)} '
+        'chapterStartChrome=${settings.chapterStartPageChromeHeight.toStringAsFixed(1)} '
+        'continuationChrome=${settings.continuationPageChromeHeight.toStringAsFixed(1)}',
       );
+      final layoutMeasurer = FlutterLayoutMeasurer(
+        fontFamily: _contentFontFamily,
+      );
+      final paginator = EpubPaginator(measurer: layoutMeasurer);
       final chapterPagesBySpine = <int, List<PageLayout>>{};
       final chapterStartPageBySpine = <int, int>{};
       final flattenedPages = <_EpubPageEntry>[];
@@ -4611,7 +4664,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           lineHeight: settings.lineHeight,
           paddingPreset: 'p$_paddingPreset-f$_fontStylePreset',
           imageLayoutPolicy: 'contain',
-          themeProfileVersion: 1,
+          themeProfileVersion: 4,
         );
         final cachedPages = await _epubPaginationCacheService.read(
           cacheKey: cacheKey,
@@ -4619,6 +4672,28 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         final pages =
             cachedPages ??
             paginator.paginate(chapter: chapter, settings: settings).pages;
+        final measuredTitleChrome = chapter.title.trim().isEmpty
+            ? 0.0
+            : max(
+                settings.chapterStartPageChromeHeight,
+                layoutMeasurer.measureChapterHeaderHeight(
+                  title: chapter.title,
+                  settings: settings,
+                ),
+              );
+        final startBody = chapter.title.trim().isEmpty
+            ? settings.contentHeight
+            : max(0.0, settings.contentHeight - measuredTitleChrome);
+        _logEpubPaginationTrace(
+          'chapter spine=${chapter.spineIndex} title="${chapter.title}" '
+          'blocks=${chapter.blocks.length} pages=${pages.length} '
+          'cache=${cachedPages == null ? 'miss' : 'hit'} '
+          'titleChrome=${measuredTitleChrome.toStringAsFixed(1)} '
+          'startBody=${startBody.toStringAsFixed(1)} '
+          'continuationBody=${settings.contentHeightForPage(hasChapterTitle: chapter.title.trim().isNotEmpty, isChapterStart: false).toStringAsFixed(1)} '
+          'firstPage=${pages.isEmpty ? '-' : _debugEpubPageSegments(pages.first)} '
+          'lastPage=${pages.isEmpty ? '-' : _debugEpubPageSegments(pages.last)}',
+        );
         if (cachedPages == null) {
           await _epubPaginationCacheService.write(
             cacheKey: cacheKey,
@@ -4684,16 +4759,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return PaginationSettings(
       viewportWidth: media.size.width,
       viewportHeight:
-          media.size.height -
-          media.padding.top -
-          media.padding.bottom -
-          _chapterHeaderBlockHeight,
+          media.size.height - media.padding.top - media.padding.bottom,
       contentPaddingTop: _contentPadding.top,
       contentPaddingBottom: _contentPadding.bottom + _paginationSafetyInset,
       contentPaddingHorizontal: _contentPadding.left,
       fontSize: _contentFontSize,
       lineHeight: _contentLineHeight,
+      chapterStartPageChromeHeight: _chapterHeaderBlockHeight,
+      continuationPageChromeHeight: _chapterOverlayReservedHeight,
     );
+  }
+
+  String _debugEpubPageSegments(PageLayout page) {
+    final segments = page.segments
+        .map(
+          (segment) =>
+              '${segment.blockIndex}:${segment.startInlineOffset}-${segment.endInlineOffset}:${segment.segmentType.name}:gap=${segment.leadingSpacingBefore.toStringAsFixed(1)}',
+        )
+        .join(',');
+    return 'lhAdj=${page.lineHeightAdjustment.toStringAsFixed(3)} [$segments]';
   }
 
   Map<String, Uint8List> _collectEpubResourceBytes({
@@ -4901,7 +4985,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     final width = _contentMaxWidth;
-    final height = _contentMaxHeight;
+    final baseContentHeight = _txtBaseContentHeight;
     final style = _paginationTextStyle();
     final pages = <_TxtPage>[];
     var start = 0;
@@ -4910,9 +4994,27 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         text: text,
         start: start,
         width: width,
-        height: height,
+        baseContentHeight: baseContentHeight,
         style: style,
         chapterTitle: chapter.title,
+      );
+      final showChapterHeader = start == 0;
+      final chromeHeight = _txtPageChromeHeight(
+        showChapterHeader: showChapterHeader,
+        chapterTitle: chapter.title,
+      );
+      final bodyHeight = _txtPaginationBodyHeight(
+        baseContentHeight: baseContentHeight,
+        showChapterHeader: showChapterHeader,
+        chapterTitle: chapter.title,
+      );
+      _logTxtPaginationTrace(
+        'page chapter=${chapter.index} start=$start end=$end '
+        'chars=${end - start} width=${width.toStringAsFixed(1)} '
+        'base=${baseContentHeight.toStringAsFixed(1)} '
+        'chrome=${_txtPageChromeName(showChapterHeader: showChapterHeader, chapterTitle: chapter.title)}:${chromeHeight.toStringAsFixed(1)} '
+        'safety=${_paginationSafetyInset.toStringAsFixed(1)} '
+        'body=${bodyHeight.toStringAsFixed(1)}',
       );
       pages.add(
         _TxtPage(
@@ -5458,7 +5560,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     required String text,
     required int start,
     required double width,
-    required double height,
+    required double baseContentHeight,
     required TextStyle style,
     required String chapterTitle,
   }) {
@@ -5467,7 +5569,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return length;
     }
 
-    final estimate = _estimateCharsPerPage(width: width, height: height);
+    final estimate = _estimateCharsPerPage(
+      width: width,
+      height: baseContentHeight,
+    );
     var chunkSize = max(256, estimate * 3);
     if (start + chunkSize > length) {
       chunkSize = length - start;
@@ -5476,11 +5581,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     bool fits(int candidateEnd) {
       final showChapterHeader = start == 0;
-      final safeHeight = max(
-        48.0,
-        height -
-            _paginationSafetyInset -
-            (showChapterHeader ? _chapterHeaderBlockHeight : 0.0),
+      final safeHeight = _txtPaginationBodyHeight(
+        baseContentHeight: baseContentHeight,
+        showChapterHeader: showChapterHeader,
+        chapterTitle: chapterTitle,
       );
       final isLastPageOfChapter = candidateEnd >= length;
       final endsAtParagraphBoundary = _endsAtParagraphBoundary(
@@ -6014,6 +6118,54 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           _contentPadding.vertical -
           _chapterOverlayReservedHeight,
     );
+  }
+
+  double get _txtBaseContentHeight {
+    final media = MediaQuery.of(context);
+    return max(
+      120.0,
+      media.size.height -
+          media.padding.top -
+          media.padding.bottom -
+          _contentPadding.vertical,
+    );
+  }
+
+  double _txtPaginationBodyHeight({
+    required double baseContentHeight,
+    required bool showChapterHeader,
+    required String chapterTitle,
+  }) {
+    return TxtPaginationMetrics.bodyHeightFromBase(
+      baseContentHeight: baseContentHeight,
+      pageChromeHeight: _txtPageChromeHeight(
+        showChapterHeader: showChapterHeader,
+        chapterTitle: chapterTitle,
+      ),
+      paginationSafetyInset: _paginationSafetyInset,
+    );
+  }
+
+  double _txtPageChromeHeight({
+    required bool showChapterHeader,
+    required String chapterTitle,
+  }) {
+    if (chapterTitle.trim().isEmpty) {
+      return 0;
+    }
+    return showChapterHeader
+        ? _chapterHeaderBlockHeight
+        : _chapterOverlayReservedHeight;
+  }
+
+  String _txtPageChromeName({
+    required bool showChapterHeader,
+    required String chapterTitle,
+  }) {
+    if (chapterTitle.trim().isEmpty) {
+      return 'none';
+    }
+    return showChapterHeader ? 'chapter-header' : 'chapter-overlay';
   }
 
   double get _paginationSafetyInset {

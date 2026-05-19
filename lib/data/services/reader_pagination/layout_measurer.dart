@@ -19,6 +19,13 @@ class BlockLayoutMeasure {
 abstract class LayoutMeasurer {
   const LayoutMeasurer();
 
+  double measureChapterHeaderHeight({
+    required String title,
+    required PaginationSettings settings,
+  }) {
+    return settings.chapterStartPageChromeHeight;
+  }
+
   BlockLayoutMeasure measure({
     required BlockNode block,
     required PaginationSettings settings,

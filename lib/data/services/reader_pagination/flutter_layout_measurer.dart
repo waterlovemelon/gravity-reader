@@ -13,6 +13,34 @@ class FlutterLayoutMeasurer extends LayoutMeasurer {
   const FlutterLayoutMeasurer({this.fontFamily});
 
   @override
+  double measureChapterHeaderHeight({
+    required String title,
+    required PaginationSettings settings,
+  }) {
+    if (title.trim().isEmpty) {
+      return 0;
+    }
+    final titleFontSize = (settings.fontSize * 1.52).clamp(24.0, 36.0);
+    final style = TextStyle(
+      fontSize: titleFontSize,
+      height: 1.18,
+      fontWeight: FontWeight.w700,
+      fontFamily: fontFamily,
+    );
+    final maxWidth =
+        settings.viewportWidth - settings.contentPaddingHorizontal * 2;
+    final painter = TextPainter(
+      text: TextSpan(text: title, style: style),
+      maxLines: 3,
+      ellipsis: '...',
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.noScaling,
+    )..layout(maxWidth: maxWidth);
+    final titleBottomGap = (settings.fontSize * 0.9).clamp(16.0, 28.0);
+    return painter.size.height + titleBottomGap;
+  }
+
+  @override
   BlockLayoutMeasure measure({
     required BlockNode block,
     required PaginationSettings settings,

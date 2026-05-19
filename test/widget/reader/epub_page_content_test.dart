@@ -158,6 +158,69 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
   });
 
+  testWidgets('applies page line height adjustment to body text', (
+    tester,
+  ) async {
+    final chapter = ChapterDocument(
+      spineIndex: 1,
+      id: 'chapter-2',
+      href: 'OPS/Text/chapter2.xhtml',
+      title: '第二章',
+      blocks: const [
+        BlockNode.paragraph(children: [InlineNode.text('继续阅读')]),
+      ],
+    );
+
+    const layout = PageLayout(
+      pageIndex: 1,
+      chapterIndex: 1,
+      lineHeightAdjustment: 0.06,
+      segments: [
+        PageSegment(
+          blockIndex: 0,
+          startInlineOffset: 0,
+          endInlineOffset: 4,
+          segmentType: PageSegmentType.paragraph,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubPageContent(
+            chapter: chapter,
+            layout: layout,
+            contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+            bodyTextStyle: const TextStyle(
+              fontSize: 20,
+              height: 1.8,
+              color: Colors.black,
+            ),
+            chapterHeaderTitleStyle: const TextStyle(
+              fontSize: 30,
+              height: 1.18,
+              fontWeight: FontWeight.w700,
+              color: Colors.black,
+            ),
+            chapterOverlayFontSize: 13,
+            chapterOverlayReservedHeight: 18,
+            chapterOverlayColor: Colors.grey,
+            textStrutStyle: const StrutStyle(fontSize: 20, height: 1.8),
+            imageBytesByPath: const {},
+            imageMaxHeight: 240,
+          ),
+        ),
+      ),
+    );
+
+    final paragraph = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((widget) => widget.text.toPlainText() == '继续阅读');
+
+    expect((paragraph.text as TextSpan).style?.height, closeTo(1.86, 0.001));
+  });
+
   testWidgets('renders image-only cover page with book title and hint', (
     tester,
   ) async {

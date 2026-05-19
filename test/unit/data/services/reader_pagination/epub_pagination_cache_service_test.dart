@@ -26,12 +26,15 @@ void main() {
     const page = PageLayout(
       pageIndex: 0,
       chapterIndex: 0,
+      lineHeightAdjustment: 0.04,
       segments: [
         PageSegment(
           blockIndex: 0,
           startInlineOffset: 0,
           endInlineOffset: 20,
           segmentType: PageSegmentType.paragraph,
+          leadingSpacingBefore: 6,
+          measuredHeight: 120,
         ),
       ],
     );
@@ -40,6 +43,9 @@ void main() {
     final restored = await service.read(cacheKey: cacheKey);
 
     expect(restored?.first.pageIndex, 0);
+    expect(restored?.first.lineHeightAdjustment, 0.04);
     expect(restored?.first.segments.first.endInlineOffset, 20);
+    expect(restored?.first.segments.first.leadingSpacingBefore, 6);
+    expect(restored?.first.segments.first.measuredHeight, 120);
   });
 }

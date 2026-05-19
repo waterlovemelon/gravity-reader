@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:myreader/core/utils/locale_text.dart';
-import 'package:myreader/data/services/reader_pagination/epub_block_spacing.dart';
 import 'package:myreader/data/services/reader_pagination/page_layout_model.dart';
 import 'package:myreader/domain/entities/reader_document/block_node.dart';
 import 'package:myreader/domain/entities/reader_document/chapter_document.dart';
@@ -49,10 +48,12 @@ class EpubPageContent extends StatelessWidget {
     final showChapterHeader = _isChapterStart(layout);
     final shouldShowChapterOverlay =
         !showChapterHeader && chapterLabel.isNotEmpty;
+    final effectiveBodyTextStyle = _bodyTextStyleForPage();
     final blockWidgets = _buildBlockWidgets(
       context: context,
       hideLeadingTitleHeading: showChapterHeader && chapterLabel.isNotEmpty,
       chapterLabel: chapterLabel,
+      bodyStyle: effectiveBodyTextStyle,
     );
     final titleBottomGap = ((bodyTextStyle.fontSize ?? 20) * 0.9).clamp(
       16.0,
@@ -259,6 +260,7 @@ class EpubPageContent extends StatelessWidget {
     required BuildContext context,
     required bool hideLeadingTitleHeading,
     required String chapterLabel,
+    required TextStyle bodyStyle,
   }) {
     final widgets = <Widget>[];
 
@@ -281,20 +283,15 @@ class EpubPageContent extends StatelessWidget {
         context: context,
         block: block,
         segment: segment,
+        bodyStyle: bodyStyle,
       );
       if (widget == null) {
         continue;
       }
-      widgets.add(widget);
-
-      final spacing = _spacingAfter(block);
-      if (spacing > 0) {
-        widgets.add(SizedBox(height: spacing));
+      if (widgets.isNotEmpty && segment.leadingSpacingBefore > 0) {
+        widgets.add(SizedBox(height: segment.leadingSpacingBefore));
       }
-    }
-
-    if (widgets.isNotEmpty && widgets.last is SizedBox) {
-      widgets.removeLast();
+      widgets.add(widget);
     }
     return widgets;
   }
@@ -303,6 +300,7 @@ class EpubPageContent extends StatelessWidget {
     required BuildContext context,
     required BlockNode block,
     required PageSegment segment,
+    required TextStyle bodyStyle,
   }) {
     switch (block.type) {
       case BlockNodeType.heading:
@@ -326,7 +324,7 @@ class EpubPageContent extends StatelessWidget {
           block: block,
           segment: segment,
           textAlign: TextAlign.justify,
-          baseStyle: bodyTextStyle,
+          baseStyle: bodyStyle,
         );
       case BlockNodeType.quote:
         return Container(
@@ -343,7 +341,7 @@ class EpubPageContent extends StatelessWidget {
             block: block,
             segment: segment,
             textAlign: TextAlign.start,
-            baseStyle: bodyTextStyle.copyWith(fontStyle: FontStyle.italic),
+            baseStyle: bodyStyle.copyWith(fontStyle: FontStyle.italic),
           ),
         );
       case BlockNodeType.separator:
@@ -379,6 +377,16 @@ class EpubPageContent extends StatelessWidget {
       textAlign: textAlign,
       strutStyle: textStrutStyle,
       text: TextSpan(style: baseStyle, children: spans),
+    );
+  }
+
+  TextStyle _bodyTextStyleForPage() {
+    if (layout.lineHeightAdjustment <= 0) {
+      return bodyTextStyle;
+    }
+    final baseHeight = bodyTextStyle.height ?? 1.0;
+    return bodyTextStyle.copyWith(
+      height: baseHeight + layout.lineHeightAdjustment,
     );
   }
 
@@ -576,10 +584,6 @@ class EpubPageContent extends StatelessWidget {
       }
     }
     return null;
-  }
-
-  double _spacingAfter(BlockNode block) {
-    return epubSpacingAfter(block, bodyTextStyle.fontSize ?? 20);
   }
 
   static bool _isChapterStart(PageLayout layout) {
