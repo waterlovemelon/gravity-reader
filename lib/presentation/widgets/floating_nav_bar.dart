@@ -98,9 +98,9 @@ class FloatingNavBar extends ConsumerWidget {
             child: Row(
               children: [
                 _buildNavItem(
-                  icon: Icons.auto_stories_outlined,
-                  selectedIcon: Icons.auto_stories_rounded,
-                  label: '阅读',
+                  icon: Icons.storefront_outlined,
+                  selectedIcon: Icons.storefront_rounded,
+                  label: '书城',
                   index: 0,
                   selectedBackground: selectedBackground,
                   selectedForeground: selectedForeground,

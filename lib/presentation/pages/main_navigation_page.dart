@@ -4,6 +4,7 @@ import 'package:myreader/core/providers/book_providers.dart';
 import 'package:myreader/core/providers/theme_provider.dart';
 import 'package:myreader/core/providers/tts_provider.dart';
 import 'package:myreader/core/utils/locale_text.dart';
+import 'package:myreader/presentation/pages/bookstore/bookstore_page.dart';
 import 'package:myreader/presentation/pages/bookshelf/bookshelf_page.dart';
 import 'package:myreader/presentation/pages/profile/profile_page.dart';
 import 'package:myreader/presentation/pages/reader/reader_page.dart';
@@ -21,7 +22,7 @@ class _MainNavigationPageState extends ConsumerState<MainNavigationPage> {
   int _currentIndex = 1;
 
   final List<Widget> _pages = const [
-    ReadingTab(),
+    BookstoreTab(),
     BookshelfTab(),
     BookFriendsTab(),
     ProfileTab(),
@@ -76,8 +77,6 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
     final capsuleColor =
         Color.lerp(theme.primaryColor, theme.cardBackgroundColor, 0.55) ??
         theme.cardBackgroundColor;
-    final primaryIconColor = theme.textColor;
-    final secondaryIconColor = theme.secondaryTextColor;
     final ringFill =
         Color.lerp(theme.primaryColor, Colors.white, 0.72) ??
         theme.primaryColor;
@@ -222,28 +221,12 @@ class _GlobalPlaybackOverlay extends ConsumerWidget {
   }
 }
 
-class ReadingTab extends ConsumerWidget {
-  const ReadingTab({super.key});
+class BookstoreTab extends ConsumerWidget {
+  const BookstoreTab({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = ref.watch(currentThemeProvider);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(LocaleText.of(context, zh: '阅读', en: 'Read')),
-      ),
-      body: Center(
-        child: Text(
-          LocaleText.of(
-            context,
-            zh: '从书架中选择一本书开始阅读',
-            en: 'Pick a book from your library to start reading',
-          ),
-          style: TextStyle(color: theme.secondaryTextColor),
-        ),
-      ),
-    );
+    return const BookstorePage();
   }
 }
 

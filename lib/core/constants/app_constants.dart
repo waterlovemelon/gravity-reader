@@ -8,6 +8,10 @@ class AppConstants {
   static const String keyTtsSelectedVoice = 'tts_selected_voice';
   static const String keyTtsBookVoiceMap = 'tts_book_voice_map_v1';
   static const int pageSizeDefault = 12;
+  static const String catalogBaseUrl = String.fromEnvironment(
+    'CATALOG_BASE_URL',
+    defaultValue: 'http://8.136.58.109:8080/v1/catalog/',
+  );
 
   static const String ttsBaseUrl = String.fromEnvironment(
     'TTS_BASE_URL',
